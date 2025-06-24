@@ -101,8 +101,6 @@ func WithInstance(r *http.Request) Option {
 	}
 }
 
-// --- Ayudante de Respuesta HTTP ---
-
 // RespondError serializa un ProblemDetail a JSON y lo escribe en el http.ResponseWriter.
 // Centraliza la lógica de respuesta de errores, asegurando consistencia.
 func RespondError(w http.ResponseWriter, p *ProblemDetail) {

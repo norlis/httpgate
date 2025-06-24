@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
+	"errors"
+	"log"
+	"net/http"
+
 	"github.com/norlis/httpgate/pkg/health"
 	"github.com/norlis/httpgate/pkg/middleware"
 	"github.com/norlis/httpgate/pkg/opa"
+	"github.com/norlis/httpgate/pkg/presenters"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
-	"log"
-	"net/http"
 )
 
 func main() {
@@ -18,7 +21,8 @@ func main() {
 		fx.Provide(func() *health.Status {
 			return health.NewStatus("dev")
 		}),
-		fx.Invoke(func(router *http.ServeMux, status *health.Status, logger *zap.Logger) {
+		fx.Provide(presenters.NewPresenters),
+		fx.Invoke(func(router *http.ServeMux, status *health.Status, logger *zap.Logger, render presenters.Presenters) {
 
 			opaConfig := opa.Config{
 				Query:        "data.authz.allow",
@@ -60,9 +64,16 @@ func main() {
 
 			api := http.NewServeMux()
 			api.HandleFunc("GET /test", func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusOK)
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte("api test"))
+				render.JSON(
+					w, r,
+					map[string]string{"text": "Hello World"},
+					presenters.WithStatusCode(http.StatusAccepted),
+					presenters.WithHeader("x-test", "1"),
+				)
+			})
+
+			api.HandleFunc("GET /test-err", func(w http.ResponseWriter, r *http.Request) {
+				render.Error(w, r, errors.New("error ocurred"), presenters.WithStatus(http.StatusBadRequest))
 			})
 
 			router.Handle("/", public(base))

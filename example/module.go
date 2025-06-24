@@ -4,14 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"go.uber.org/fx"
 
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"net/http"
 	"os"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 func NewLogger() (*zap.Logger, error) {
