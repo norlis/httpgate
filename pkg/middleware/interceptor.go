@@ -3,8 +3,9 @@ package middleware
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/norlis/httpgate/pkg/problem"
 	"net/http"
+
+	"github.com/norlis/httpgate/pkg/problem"
 )
 
 type ErrorMessage struct {

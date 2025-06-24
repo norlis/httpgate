@@ -22,8 +22,7 @@ type WrapResponseWriter interface {
 
 type responseWriter struct {
 	http.ResponseWriter
-	statusCode  int
-	intercepted bool
+	statusCode int
 }
 
 func NewWrapResponseWriter(w http.ResponseWriter, protoMajor int) WrapResponseWriter {

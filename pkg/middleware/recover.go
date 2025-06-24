@@ -2,9 +2,10 @@ package middleware
 
 import (
 	"errors"
-	"github.com/norlis/httpgate/pkg/presenters"
 	"net/http"
 	"runtime/debug"
+
+	"github.com/norlis/httpgate/pkg/presenters"
 
 	"go.uber.org/zap"
 )
