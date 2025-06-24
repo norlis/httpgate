@@ -38,13 +38,10 @@ func WithDetail(detail string) ErrorOption {
 	}
 }
 
-//http.StatusText
-
 // Error genera una respuesta de error estandarizada usando el patrón de opciones.
 func (p *presenters) Error(w http.ResponseWriter, r *http.Request, err error, opts ...ErrorOption) {
 	config := &errorConfig{
 		status: http.StatusInternalServerError,
-		detail: "unknown error",
 	}
 
 	for _, opt := range opts {
@@ -57,6 +54,10 @@ func (p *presenters) Error(w http.ResponseWriter, r *http.Request, err error, op
 
 	if config.detail == "" && err != nil {
 		config.detail = err.Error()
+	}
+
+	if config.detail == "" {
+		config.detail = "unknown error"
 	}
 
 	if config.status >= 500 {
