@@ -37,7 +37,12 @@ func main() {
 			}
 
 			commons := []middleware.Middleware{
-				middleware.Recover(logger),
+				middleware.APIErrorMiddleware(
+					middleware.WithIntercept(http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusInternalServerError),
+					middleware.WithCustomMessage(http.StatusNotFound, "resource not found"),
+					middleware.WithCustomMessage(http.StatusMethodNotAllowed, "method is not allowed for this resource."),
+				),
+				middleware.Recover(logger, render),
 				middleware.RequestLogger(logger),
 				middleware.Cors(),
 			}
@@ -74,6 +79,10 @@ func main() {
 
 			api.HandleFunc("GET /test-err", func(w http.ResponseWriter, r *http.Request) {
 				render.Error(w, r, errors.New("error ocurred"), presenters.WithStatus(http.StatusBadRequest))
+			})
+
+			api.HandleFunc("GET /panic", func(w http.ResponseWriter, r *http.Request) {
+				panic(errors.New("panic test"))
 			})
 
 			router.Handle("/", public(base))

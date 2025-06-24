@@ -1,13 +1,15 @@
 package middleware
 
 import (
+	"errors"
+	"github.com/norlis/httpgate/pkg/presenters"
 	"net/http"
 	"runtime/debug"
 
 	"go.uber.org/zap"
 )
 
-func Recover(log *zap.Logger) func(next http.Handler) http.Handler {
+func Recover(log *zap.Logger, render presenters.Presenters) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		fn := func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
@@ -21,7 +23,11 @@ func Recover(log *zap.Logger) func(next http.Handler) http.Handler {
 						Error("Recovered from panic", zap.String("Stacktrace", string(debug.Stack())))
 
 					if r.Header.Get("Connection") != "Upgrade" {
-						w.WriteHeader(http.StatusInternalServerError)
+						render.Error(
+							w, r,
+							errors.New("recovered from panic"),
+							presenters.WithStatus(http.StatusInternalServerError),
+						)
 					}
 				}
 			}()

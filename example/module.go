@@ -44,7 +44,6 @@ func NewHttpServerMux(lc fx.Lifecycle, logger *zap.Logger) *http.ServeMux {
 		Handler:           mux,
 		ReadHeaderTimeout: 30 * time.Second,
 	}
-
 	lc.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
 			logger.Info("Iniciando servidor HTTP")

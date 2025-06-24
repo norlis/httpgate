@@ -7,9 +7,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// JSON marshals 'v' to JSON, automatically escaping HTML and setting the
-// Content-Type as application/json. Permite pasar opcionalmente un código de estado
-// y cabeceras adicionales.
+// JSON marshals 'v' to JSON, automatically escaping HTML
+// Permite pasar opcionalmente statusCode y headers adicionales.
 func (p *presenters) JSON(w http.ResponseWriter, r *http.Request, v interface{}, opts ...ResponseOption) {
 	config := &responseConfig{
 		statusCode: http.StatusOK,

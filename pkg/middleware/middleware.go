@@ -14,3 +14,27 @@ func Chain(xs ...Middleware) Middleware {
 		return next
 	}
 }
+
+type WrapResponseWriter interface {
+	http.ResponseWriter
+	Status() int
+}
+
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode  int
+	intercepted bool
+}
+
+func NewWrapResponseWriter(w http.ResponseWriter, protoMajor int) WrapResponseWriter {
+	return &responseWriter{ResponseWriter: w, statusCode: protoMajor}
+}
+
+func (rw *responseWriter) Status() int {
+	return rw.statusCode
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
+}

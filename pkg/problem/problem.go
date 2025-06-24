@@ -38,16 +38,12 @@ type Extension struct {
 	StackTrace string    `json:"stackTrace,omitempty"`
 }
 
-// Error interface `error`.
 func (p *ProblemDetail) Error() string {
 	return p.Title
 }
 
-// Option es una función que configura un ProblemDetail.
 type Option func(*ProblemDetail)
 
-// New crea un nuevo ProblemDetail. Los campos `title` y `status` son requeridos.
-// Opciones adicionales pueden ser pasadas para configurar los campos opcionales.
 func New(title string, status int, opts ...Option) *ProblemDetail {
 	p := &ProblemDetail{
 		Title:  title,
@@ -64,20 +60,14 @@ func New(title string, status int, opts ...Option) *ProblemDetail {
 	return p
 }
 
-// FromError es una función de ayuda para crear un ProblemDetail a partir de un error nativo de Go.
-// Es útil para envolver errores de capas inferiores (ej: base de datos, servicios externos)
-// en un problema HTTP estándar.
 func FromError(err error, status int, opts ...Option) *ProblemDetail {
-	// Usa el texto del status HTTP como título por defecto.
-	// El detalle se toma del mensaje del error original.
 	p := New(http.StatusText(status), status, opts...)
-	p.Detail = err.Error()
+	if p.Detail == "" {
+		p.Detail = err.Error()
+	}
 	return p
 }
 
-// --- Opciones Funcionales ---
-
-// WithType asigna el URI que identifica el tipo de problema.
 func WithType(uri string) Option {
 	return func(p *ProblemDetail) {
 		p.Type = uri
