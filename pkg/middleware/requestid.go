@@ -56,3 +56,15 @@ func RequestID(opts ...RequestIdOption) func(http.Handler) http.Handler {
 		})
 	}
 }
+
+// GetRequestID returns a request ID from the given context if one is present.
+// Returns the empty string if a request ID cannot be found.
+func GetRequestID(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	if reqID, ok := ctx.Value(RequestIDKey).(string); ok {
+		return reqID
+	}
+	return ""
+}

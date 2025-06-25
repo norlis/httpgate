@@ -37,6 +37,7 @@ func main() {
 			}
 
 			commons := []middleware.Middleware{
+				middleware.RequestID(middleware.WithHeaderName("X-Request-ID")),
 				middleware.APIErrorMiddleware(
 					middleware.WithIntercept(http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusInternalServerError),
 					middleware.WithCustomMessage(http.StatusNotFound, "resource not found"),
