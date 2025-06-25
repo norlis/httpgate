@@ -12,16 +12,13 @@ type ErrorMessage struct {
 	Message string
 }
 
-// InterceptorOptions contiene la configuración para nuestro middleware de errores.
 type InterceptorOptions struct {
 	codesToIntercept map[int]bool
 	customMessages   map[int]ErrorMessage
 }
 
-// Option es el tipo de función para el patrón de opciones funcionales.
 type Option func(*InterceptorOptions)
 
-// WithIntercept es una opción para especificar qué códigos de estado HTTP interceptar.
 func WithIntercept(codes ...int) Option {
 	return func(opts *InterceptorOptions) {
 		if opts.codesToIntercept == nil {
@@ -94,7 +91,6 @@ func (w *apiErrorInterceptor) writeCustomErrorResponse() (int, error) {
 	return w.ResponseWriter.Write(jsonData)
 }
 
-// APIErrorMiddleware es un constructor que crea el middleware a partir de opciones.
 func APIErrorMiddleware(opts ...Option) func(http.Handler) http.Handler {
 	options := &InterceptorOptions{}
 	for _, opt := range opts {

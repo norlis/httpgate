@@ -3,6 +3,7 @@ module github.com/norlis/httpgate
 go 1.24.2
 
 require (
+	github.com/google/uuid v1.6.0
 	github.com/open-policy-agent/opa v1.5.1
 	go.uber.org/fx v1.24.0
 	go.uber.org/zap v1.27.0
@@ -16,7 +17,6 @@ require (
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/prometheus/client_golang v1.22.0 // indirect

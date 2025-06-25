@@ -2,9 +2,10 @@ package middleware
 
 import (
 	"context"
-	"github.com/google/uuid"
 	"log"
 	"net/http"
+
+	"github.com/google/uuid"
 )
 
 // Key to use when setting the request ID.

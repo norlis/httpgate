@@ -45,7 +45,7 @@ func main() {
 				),
 				middleware.Recover(logger, render),
 				middleware.RequestLogger(logger),
-				middleware.Cors(),
+				middleware.AllowAll(logger).Middleware,
 			}
 
 			public := middleware.Chain(commons...)
