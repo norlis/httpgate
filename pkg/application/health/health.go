@@ -5,28 +5,21 @@ import (
 	"encoding/json"
 	"net/http"
 	"sync"
-)
 
-// Checker define la interfaz para una comprobación de salud individual.
-// Cualquier componente que necesite ser verificado (BD, API externa, etc.)
-// debe implementar esta interfaz.
-type Checker interface {
-	Check() error
-}
+	"github.com/norlis/httpgate/pkg/port"
+)
 
 // Probe es un manejador HTTP que ejecuta un conjunto de comprobaciones de salud.
 type Probe struct {
-	// Usamos un mutex para proteger el acceso concurrente al mapa de checkers,
-	// aunque en la práctica se suele configurar una vez al inicio.
 	mu       sync.RWMutex
-	checkers map[string]Checker
+	checkers map[string]port.Checker
 }
 
 // NewProbe crea y devuelve un nuevo Probe.
 // Puede ser inicializado sin checkers, lo cual es útil para una sonda de Liveness.
-func NewProbe(checkers map[string]Checker) *Probe {
+func NewProbe(checkers map[string]port.Checker) *Probe {
 	if checkers == nil {
-		checkers = make(map[string]Checker)
+		checkers = make(map[string]port.Checker)
 	}
 	return &Probe{
 		checkers: checkers,

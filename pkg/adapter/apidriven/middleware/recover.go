@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"runtime/debug"
 
-	"github.com/norlis/httpgate/pkg/presenters"
+	"github.com/norlis/httpgate/pkg/adapter/apidriven/presenters"
 
 	"go.uber.org/zap"
 )

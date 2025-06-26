@@ -3,7 +3,7 @@ package presenters
 import (
 	"net/http"
 
-	"github.com/norlis/httpgate/pkg/problem"
+	"github.com/norlis/httpgate/pkg/kit/problem"
 
 	"go.uber.org/zap"
 )

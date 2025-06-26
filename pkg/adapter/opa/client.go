@@ -4,7 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/norlis/httpgate/pkg/middleware"
+	"github.com/norlis/httpgate/pkg/domain"
+
 	"github.com/open-policy-agent/opa/v1/rego"
 	"go.uber.org/zap"
 )
@@ -49,7 +50,7 @@ func NewOpaSdkClientFromConfig(ctx context.Context, cfg Config, logger *zap.Logg
 }
 
 // IsAllowed evalúa la política cargada con el input proporcionado.
-func (c *SdkClient) IsAllowed(ctx context.Context, input middleware.PolicyInput) (bool, error) {
+func (c *SdkClient) IsAllowed(ctx context.Context, input domain.PolicyInput) (bool, error) {
 	results, err := c.preparedQuery.Eval(ctx, rego.EvalInput(input))
 	if err != nil {
 		return false, fmt.Errorf("error al evaluar la política de OPA: %w", err)

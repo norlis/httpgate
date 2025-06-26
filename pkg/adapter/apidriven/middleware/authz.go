@@ -2,13 +2,15 @@ package middleware
 
 import (
 	"fmt"
+	"github.com/norlis/httpgate/pkg/domain"
+	"github.com/norlis/httpgate/pkg/port"
 	"net/http"
 	"strings"
 
-	"github.com/norlis/httpgate/pkg/problem"
+	"github.com/norlis/httpgate/pkg/kit/problem"
 )
 
-func AuthorizationMiddleware(policyEnforcer PolicyEnforcer) func(http.Handler) http.Handler {
+func AuthorizationMiddleware(policyEnforcer port.PolicyEnforcer) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
@@ -21,7 +23,7 @@ func AuthorizationMiddleware(policyEnforcer PolicyEnforcer) func(http.Handler) h
 			//action "METODO:/ruta"
 			action := fmt.Sprintf("%s:%s", strings.ToUpper(r.Method), r.URL.Path)
 
-			input := PolicyInput{
+			input := domain.PolicyInput{
 				Roles:  roles,
 				Action: action,
 			}

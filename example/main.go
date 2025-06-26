@@ -6,10 +6,11 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/norlis/httpgate/pkg/health"
-	"github.com/norlis/httpgate/pkg/middleware"
-	"github.com/norlis/httpgate/pkg/opa"
-	"github.com/norlis/httpgate/pkg/presenters"
+	"github.com/norlis/httpgate/pkg/adapter/apidriven/middleware"
+	"github.com/norlis/httpgate/pkg/adapter/apidriven/presenters"
+	"github.com/norlis/httpgate/pkg/adapter/opa"
+	"github.com/norlis/httpgate/pkg/application/health"
+
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 )

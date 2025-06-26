@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/norlis/httpgate/pkg/problem"
+	"github.com/norlis/httpgate/pkg/kit/problem"
 )
 
 type ErrorMessage struct {
