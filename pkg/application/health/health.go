@@ -3,20 +3,24 @@ package health
 
 import (
 	"encoding/json"
+	"github.com/norlis/httpgate/pkg/port"
 	"net/http"
 	"sync"
-
-	"github.com/norlis/httpgate/pkg/port"
+	"time"
 )
+
+// CheckResult almacena el resultado detallado de una única comprobación de salud.
+type CheckResult struct {
+	Status   string `json:"status"`          // "OK" o "FAIL"
+	Duration string `json:"duration"`        // Duración de la comprobación en formato legible.
+	Error    string `json:"error,omitempty"` // Mensaje de error si el estado es "FAIL".
+}
 
 // Probe es un manejador HTTP que ejecuta un conjunto de comprobaciones de salud.
 type Probe struct {
-	mu       sync.RWMutex
 	checkers map[string]port.Checker
 }
 
-// NewProbe crea y devuelve un nuevo Probe.
-// Puede ser inicializado sin checkers, lo cual es útil para una sonda de Liveness.
 func NewProbe(checkers map[string]port.Checker) *Probe {
 	if checkers == nil {
 		checkers = make(map[string]port.Checker)
@@ -27,34 +31,49 @@ func NewProbe(checkers map[string]port.Checker) *Probe {
 }
 
 // ServeHTTP implementa la interfaz http.Handler.
-// Ejecuta todas las comprobaciones registradas y devuelve un resultado consolidado.
 func (p *Probe) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-
-	// Mapa para almacenar el resultado de cada comprobación.
-	results := make(map[string]string, len(p.checkers))
-	httpStatus := http.StatusOK
-
-	// Si no hay checkers, es un simple OK. Ideal para Liveness.
 	if len(p.checkers) == 0 {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("OK"))
 		return
 	}
 
-	// Ejecutar cada comprobación.
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	results := make(map[string]CheckResult, len(p.checkers))
+	httpStatus := http.StatusOK
+
 	for name, checker := range p.checkers {
-		if err := checker.Check(); err != nil {
-			// Si una sola comprobación falla, el estado general es de fallo.
-			httpStatus = http.StatusServiceUnavailable
-			results[name] = err.Error()
-		} else {
-			results[name] = "OK"
-		}
+		wg.Add(1)
+		go func(name string, checker port.Checker) {
+			defer wg.Done()
+
+			start := time.Now()
+			err := checker.Check()
+			duration := time.Since(start)
+
+			mu.Lock()
+			defer mu.Unlock()
+
+			if err != nil {
+				httpStatus = http.StatusServiceUnavailable
+				results[name] = CheckResult{
+					Status:   "FAIL",
+					Duration: duration.String(),
+					Error:    err.Error(),
+				}
+			} else {
+				results[name] = CheckResult{
+					Status:   "OK",
+					Duration: duration.String(),
+				}
+			}
+		}(name, checker)
 	}
 
-	// Escribir la respuesta JSON.
+	wg.Wait()
+
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(httpStatus)
 	_ = json.NewEncoder(w).Encode(results)

@@ -1,6 +1,6 @@
 
 # --- Configuración y Variables ---
-APP_IMPORT_PATH ?= github.com/norlis/httpgate
+APP_IMPORT_PATH := $(shell go list -m)
 ALL_PKGS := $(sort $(shell go list ./...))
 
 # Variables para inyectar en el build
