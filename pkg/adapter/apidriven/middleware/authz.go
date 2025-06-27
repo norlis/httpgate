@@ -2,10 +2,11 @@ package middleware
 
 import (
 	"fmt"
-	"github.com/norlis/httpgate/pkg/domain"
-	"github.com/norlis/httpgate/pkg/port"
 	"net/http"
 	"strings"
+
+	"github.com/norlis/httpgate/pkg/domain"
+	"github.com/norlis/httpgate/pkg/port"
 
 	"github.com/norlis/httpgate/pkg/kit/problem"
 )

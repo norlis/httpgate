@@ -3,10 +3,11 @@ package health
 
 import (
 	"encoding/json"
-	"github.com/norlis/httpgate/pkg/port"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/norlis/httpgate/pkg/port"
 )
 
 // CheckResult almacena el resultado detallado de una única comprobación de salud.

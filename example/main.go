@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -10,12 +11,23 @@ import (
 	"github.com/norlis/httpgate/pkg/adapter/apidriven/presenters"
 	"github.com/norlis/httpgate/pkg/adapter/opa"
 	"github.com/norlis/httpgate/pkg/application/health"
-
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 )
 
+// banner
+// https://patorjk.com/software/taag/#p=display&f=DiamFont&t=EXAMPLE
+const banner = `
+▗▄▄▄▖▗▖  ▗▖ ▗▄▖ ▗▖  ▗▖▗▄▄▖ ▗▖   ▗▄▄▄▖
+▐▌    ▝▚▞▘ ▐▌ ▐▌▐▛▚▞▜▌▐▌ ▐▌▐▌   ▐▌   
+▐▛▀▀▘  ▐▌  ▐▛▀▜▌▐▌  ▐▌▐▛▀▘ ▐▌   ▐▛▀▀▘
+▐▙▄▄▖▗▞▘▝▚▖▐▌ ▐▌▐▌  ▐▌▐▌   ▐▙▄▄▖▐▙▄▄▖
+`
+
 func main() {
+
+	fmt.Print(banner)
+
 	app := fx.New(
 		fx.Provide(NewLogger),
 		fx.Provide(NewHttpServerMux),
