@@ -11,22 +11,25 @@ import (
 	"github.com/norlis/httpgate/pkg/kit/problem"
 )
 
-func AuthorizationMiddleware(policyEnforcer port.PolicyEnforcer) func(http.Handler) http.Handler {
+type PayloadExtractor func(r *http.Request) (map[string]any, error)
+
+func AuthorizationMiddleware(policyEnforcer port.PolicyEnforcer, extractor PayloadExtractor) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
-			rolesHeader := r.Header.Get("X-User-Roles")
-			roles := make([]string, 0)
-			if rolesHeader != "" {
-				roles = strings.Split(rolesHeader, ",")
+			payload, err := extractor(r)
+			if err != nil {
+				problem.RespondError(w, problem.FromError(err, http.StatusBadRequest, problem.WithInstance(r)))
+				return
 			}
 
-			//action "METODO:/ruta"
+			//action = "METODO:/ruta"
+			// GET:/api/person
 			action := fmt.Sprintf("%s:%s", strings.ToUpper(r.Method), r.URL.Path)
 
 			input := domain.PolicyInput{
-				Roles:  roles,
-				Action: action,
+				Payload: payload,
+				Action:  action,
 			}
 
 			// Esta llamada es agnóstica a si OPA es un servicio o una librería.

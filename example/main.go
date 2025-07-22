@@ -50,7 +50,7 @@ func main() {
 			}
 
 			commons := []middleware.Middleware{
-				middleware.RequestID(middleware.WithHeaderName("X-Request-ID")),
+				middleware.TraceId(middleware.WithHeaderName("X-Request-ID")),
 				middleware.APIErrorMiddleware(
 					middleware.WithIntercept(http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusInternalServerError),
 					middleware.WithCustomMessage(http.StatusNotFound, "resource not found"),
@@ -65,7 +65,12 @@ func main() {
 			protected := middleware.Chain(
 				append(
 					commons,
-					[]middleware.Middleware{middleware.AuthorizationMiddleware(authz)}...,
+					[]middleware.Middleware{middleware.AuthorizationMiddleware(
+						authz,
+						func(r *http.Request) (map[string]any, error) {
+							return map[string]any{"roles": []string{}}, nil
+						},
+					)}...,
 				)...,
 			)
 

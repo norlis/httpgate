@@ -12,7 +12,7 @@ default action_allowed := false
 
 default roles := {"anonymous"}
 
-roles := input.roles if {
+roles := input.payload.roles if {
 	count(input.roles) > 0
 }
 

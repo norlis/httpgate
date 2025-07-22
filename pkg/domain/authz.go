@@ -1,6 +1,6 @@
 package domain
 
 type PolicyInput struct {
-	Roles  []string `json:"roles"`
-	Action string   `json:"action"`
+	Payload map[string]any `json:"payload"`
+	Action  string         `json:"action"`
 }
