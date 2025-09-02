@@ -25,7 +25,7 @@ func AuthorizationMiddleware(policyEnforcer port.PolicyEnforcer, extractor Paylo
 
 			//action = "METODO:/ruta"
 			// GET:/api/person
-			action := fmt.Sprintf("%s:%s", strings.ToUpper(r.Method), r.URL.Path)
+			action := fmt.Sprintf("%s:%s", strings.ToUpper(r.Method), r.URL.RequestURI())
 
 			input := domain.PolicyInput{
 				Payload: payload,
