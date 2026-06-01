@@ -1,6 +1,7 @@
 package problem
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -10,7 +11,7 @@ import (
 	"time"
 )
 
-func TestNew_marshalsRFC7807Shape(t *testing.T) {
+func TestNew_marshalsRFC9457Shape(t *testing.T) {
 	t.Parallel()
 	d := New(
 		"forbidden", http.StatusForbidden,
@@ -56,16 +57,36 @@ func TestRespond_setsContentTypeAndStatus(t *testing.T) {
 	}
 }
 
-func TestWithInstance_setsPathAndRequestID(t *testing.T) {
+func TestWithInstance_setsPathAndRequestIDFromContext(t *testing.T) {
 	t.Parallel()
 	req := httptest.NewRequest("GET", "/api/users/42", http.NoBody)
-	req.Header.Set("X-Request-Id", "abc-123")
+	req = req.WithContext(ContextWithRequestID(req.Context(), "abc-123"))
 	d := New("nope", http.StatusBadRequest, WithInstance(req))
 	if d.Instance != "/api/users/42" {
 		t.Fatalf("instance = %q", d.Instance)
 	}
 	if d.RequestID != "abc-123" {
 		t.Fatalf("requestID = %q", d.RequestID)
+	}
+}
+
+func TestWithInstance_noRequestIDWhenContextEmpty(t *testing.T) {
+	t.Parallel()
+	req := httptest.NewRequest("GET", "/x", http.NoBody)
+	d := New("nope", http.StatusBadRequest, WithInstance(req))
+	if d.RequestID != "" {
+		t.Fatalf("requestID = %q, want empty", d.RequestID)
+	}
+}
+
+func TestRequestIDFromContext_roundTrips(t *testing.T) {
+	t.Parallel()
+	ctx := ContextWithRequestID(context.Background(), "xyz-789")
+	if got := RequestIDFromContext(ctx); got != "xyz-789" {
+		t.Fatalf("got %q, want xyz-789", got)
+	}
+	if got := RequestIDFromContext(context.Background()); got != "" {
+		t.Fatalf("empty context: got %q, want \"\"", got)
 	}
 }
 

@@ -18,7 +18,7 @@ type InterceptorOptions struct {
 type Option func(*InterceptorOptions)
 
 // WithIntercept registers the status codes that should be rewritten as RFC
-// 7807 problem responses.
+// 9457 problem responses.
 func WithIntercept(codes ...int) Option {
 	return func(opts *InterceptorOptions) {
 		if opts.codesToIntercept == nil {
@@ -45,8 +45,13 @@ type apiErrorInterceptor struct {
 	http.ResponseWriter
 	request           *http.Request
 	interceptedStatus int
+	written           bool
 	options           *InterceptorOptions
 }
+
+// Unwrap exposes the underlying writer so http.NewResponseController can
+// discover Flush, Hijack, deadlines, etc. through the interceptor (Go 1.20+).
+func (w *apiErrorInterceptor) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (w *apiErrorInterceptor) WriteHeader(statusCode int) {
 	if w.options.codesToIntercept[statusCode] {
@@ -57,20 +62,25 @@ func (w *apiErrorInterceptor) WriteHeader(statusCode int) {
 }
 
 func (w *apiErrorInterceptor) Write(p []byte) (int, error) {
+	// Once the problem+json body has been written, drop any further handler
+	// output so it cannot be appended after it (a corrupt/split response).
+	if w.written {
+		return len(p), nil
+	}
 	if w.interceptedStatus != 0 {
-		return w.writeCustomErrorResponse()
+		if err := w.writeCustomErrorResponse(); err != nil {
+			return 0, err
+		}
+		// Report a full write so the handler does not see a short-write.
+		return len(p), nil
 	}
 	return w.ResponseWriter.Write(p)
 }
 
-func (w *apiErrorInterceptor) writeCustomErrorResponse() (int, error) {
+func (w *apiErrorInterceptor) writeCustomErrorResponse() error {
 	statusCode := w.interceptedStatus
 	w.interceptedStatus = 0
-
-	// Body is RFC 7807 (problem detail). Use the correct media type so
-	// callers can content-negotiate against it.
-	w.Header().Set("Content-Type", "application/problem+json; charset=utf-8")
-	w.ResponseWriter.WriteHeader(statusCode)
+	w.written = true
 
 	// Detail stays empty unless a custom message was registered for this
 	// status; we deliberately avoid problem.FromError here because its
@@ -80,19 +90,22 @@ func (w *apiErrorInterceptor) writeCustomErrorResponse() (int, error) {
 		opts = append(opts, problem.WithDetail(customMsg))
 	}
 
-	pb := problem.New(http.StatusText(statusCode), statusCode, opts...)
-
-	jsonData, err := json.Marshal(pb)
+	// Body is RFC 9457 (problem detail). Marshal before committing the header
+	// so a marshal failure does not leave a half-written response.
+	jsonData, err := json.Marshal(problem.New(http.StatusText(statusCode), statusCode, opts...))
 	if err != nil {
-		http.Error(w.ResponseWriter, "Internal Server Error", http.StatusInternalServerError)
-		return 0, err
+		w.ResponseWriter.WriteHeader(http.StatusInternalServerError)
+		return err
 	}
 
-	return w.ResponseWriter.Write(jsonData)
+	w.Header().Set("Content-Type", "application/problem+json; charset=utf-8")
+	w.ResponseWriter.WriteHeader(statusCode)
+	_, err = w.ResponseWriter.Write(jsonData)
+	return err
 }
 
 // InterceptStatus builds middleware that rewrites the configured status codes
-// into RFC 7807 problem+json responses. Unintercepted codes pass through
+// into RFC 9457 problem+json responses. Unintercepted codes pass through
 // untouched.
 func InterceptStatus(opts ...Option) func(http.Handler) http.Handler {
 	options := &InterceptorOptions{}
@@ -110,7 +123,7 @@ func InterceptStatus(opts ...Option) func(http.Handler) http.Handler {
 			next.ServeHTTP(interceptor, r)
 
 			if interceptor.interceptedStatus != 0 {
-				_, _ = interceptor.writeCustomErrorResponse()
+				_ = interceptor.writeCustomErrorResponse()
 			}
 		})
 	}

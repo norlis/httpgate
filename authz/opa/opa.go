@@ -1,5 +1,6 @@
 // Package opa implements an authz.Enforcer backed by Open Policy Agent,
-// evaluating Rego policies loaded from disk, plus declarative-data lookups.
+// evaluating Rego policies loaded from disk. Use Query for constant-query
+// introspection and Permissions / AllowedResources for frontend capability hints.
 package opa
 
 import (
@@ -7,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 
 	"github.com/open-policy-agent/opa/v1/rego"
@@ -27,11 +27,11 @@ type Client struct {
 	query        rego.PreparedEvalQuery
 	policiesPath string
 	dataFiles    []string
-	dataCache    sync.Map // map[string]*dataQuery
+	queryCache   sync.Map // map[string]*preparedQuery
 	logger       *slog.Logger
 }
 
-type dataQuery struct {
+type preparedQuery struct {
 	once  sync.Once
 	query rego.PreparedEvalQuery
 	err   error
@@ -94,58 +94,96 @@ func (c *Client) IsAllowed(ctx context.Context, in authz.Input) (bool, error) {
 	return allowed, nil
 }
 
-// Data evaluates data.<path> against the loaded bundle and returns the
-// decoded value. path is a dot-separated identifier without the "data."
-// prefix; nested paths work (e.g. "roles.admin").
-//
-// Undefined paths return (nil, nil), matching OPA semantics.
-//
-// Prepared queries are cached per path with single-prepare semantics
-// under concurrent first-access (sync.Once).
-//
-// Data is for declarative data only. To evaluate policy decisions, use
-// IsAllowed.
-func (c *Client) Data(ctx context.Context, path string) (any, error) {
-	if path == "" {
-		return nil, errors.New("opa: data path cannot be empty")
-	}
-	if strings.HasPrefix(path, "data.") {
-		return nil, fmt.Errorf("opa: data path must not include 'data.' prefix: %q", path)
-	}
-
-	entry, _ := c.dataCache.LoadOrStore(path, &dataQuery{})
-	dq := entry.(*dataQuery)
-	dq.once.Do(func() {
-		// Build the query using bracket notation so segments that happen
-		// to collide with Rego keywords (e.g. "not", "if", "in") parse
-		// cleanly: data["foo"]["bar"].
-		var b strings.Builder
-		b.WriteString("data")
-		for seg := range strings.SplitSeq(path, ".") {
-			b.WriteString("[\"")
-			b.WriteString(seg)
-			b.WriteString("\"]")
-		}
+// prepared returns (lazily creating and caching) the PreparedEvalQuery for
+// query. A prepare error is permanent for the Client's lifetime: the zero query
+// and that error are returned on every subsequent call for the same query.
+func (c *Client) prepared(ctx context.Context, query string) (rego.PreparedEvalQuery, error) {
+	entry, _ := c.queryCache.LoadOrStore(query, &preparedQuery{})
+	pq := entry.(*preparedQuery)
+	pq.once.Do(func() {
 		prep, err := rego.New(
-			rego.Query(b.String()),
+			rego.Query(query),
 			rego.Load(append([]string{c.policiesPath}, c.dataFiles...), nil),
 		).PrepareForEval(ctx)
 		if err != nil {
-			dq.err = fmt.Errorf("opa: prepare data %q: %w", path, err)
+			pq.err = fmt.Errorf("opa: prepare %q: %w", query, err)
 			return
 		}
-		dq.query = prep
+		pq.query = prep
 	})
-	if dq.err != nil {
-		return nil, dq.err
+	return pq.query, pq.err
+}
+
+const (
+	permissionsQuery      = "data.authz.permissions"
+	allowedResourcesQuery = "data.authz.allowed_resources"
+)
+
+// Query evaluates a developer-supplied Rego query (a compile-time CONSTANT,
+// never user input) against in, returning the decoded value. Prepared queries
+// are cached per query string with single-prepare semantics under concurrent
+// first access. An undefined query yields (nil, nil).
+//
+// A prepare failure for a query is permanent for the lifetime of the Client
+// (the bundle is loaded once); call New again to recover.
+//
+// For static data reads, pass a zero Input: Query(ctx, "data.roles", authz.Input{}).
+func (c *Client) Query(ctx context.Context, query string, in authz.Input) (any, error) {
+	if query == "" {
+		return nil, errors.New("opa: query cannot be empty")
 	}
-	results, err := dq.query.Eval(ctx)
+	pq, err := c.prepared(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("opa: eval data %q: %w", path, err)
+		return nil, err
 	}
-	if len(results) == 0 || len(results[0].Expressions) == 0 {
-		//nolint:nilnil // documented contract: an unknown/empty OPA path yields (nil, nil), not an error.
+	rs, err := pq.Eval(ctx, rego.EvalInput(in))
+	if err != nil {
+		return nil, fmt.Errorf("opa: eval %q: %w", query, err)
+	}
+	if len(rs) == 0 || len(rs[0].Expressions) == 0 {
+		//nolint:nilnil // documented: an undefined query yields (nil, nil), not an error.
 		return nil, nil
 	}
-	return results[0].Expressions[0].Value, nil
+	return rs[0].Expressions[0].Value, nil
+}
+
+// Permissions returns the permission names granted to in's roles by evaluating
+// data.authz.permissions. Requires the policy to expose a set rule there.
+//
+// Roles must come from the caller's authenticated context, never from a
+// user-supplied value. This is for UI capability hints (show/hide), not a
+// security boundary — IsAllowed still enforces every request.
+func (c *Client) Permissions(ctx context.Context, in authz.Input) ([]string, error) {
+	v, err := c.Query(ctx, permissionsQuery, in)
+	if err != nil {
+		return nil, err
+	}
+	return toStringSlice(v), nil
+}
+
+// AllowedResources returns the flattened regex path patterns granted to in's
+// roles by evaluating data.authz.allowed_resources. These reveal internal
+// route structure; return them only to the authenticated owner of the roles.
+func (c *Client) AllowedResources(ctx context.Context, in authz.Input) ([]string, error) {
+	v, err := c.Query(ctx, allowedResourcesQuery, in)
+	if err != nil {
+		return nil, err
+	}
+	return toStringSlice(v), nil
+}
+
+// toStringSlice converts an OPA set (decoded as []any) to []string. A non-slice
+// input returns nil; non-string elements are silently dropped.
+func toStringSlice(v any) []string {
+	items, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		if s, ok := it.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }

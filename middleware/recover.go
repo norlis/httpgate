@@ -10,7 +10,7 @@ import (
 )
 
 // Recover builds middleware that recovers from panics, logs the stack trace,
-// and responds 500 as RFC 7807 (except for http.ErrAbortHandler, which is
+// and responds 500 as RFC 9457 (except for http.ErrAbortHandler, which is
 // re-panicked, and Upgrade connections, which are left untouched).
 func Recover(log *slog.Logger) func(next http.Handler) http.Handler {
 	logger := log.With(slog.String("logger", "middleware.recover"))

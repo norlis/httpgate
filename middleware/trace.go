@@ -6,9 +6,9 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
-)
 
-type ctxTraceKey struct{}
+	"github.com/norlis/httpgate/problem"
+)
 
 type traceIDConfig struct {
 	headerName string
@@ -61,7 +61,7 @@ func TraceID(opts ...TraceIDOption) func(http.Handler) http.Handler {
 				}
 			}
 
-			ctx := context.WithValue(r.Context(), ctxTraceKey{}, traceID)
+			ctx := problem.ContextWithRequestID(r.Context(), traceID)
 			w.Header().Set(cfg.headerName, traceID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
@@ -69,12 +69,8 @@ func TraceID(opts ...TraceIDOption) func(http.Handler) http.Handler {
 }
 
 // TraceIDFromContext returns the trace ID stored by TraceID, or "" if absent.
+// It delegates to problem.RequestIDFromContext so the trace ID and the
+// problem+json RequestID share a single context key.
 func TraceIDFromContext(ctx context.Context) string {
-	if ctx == nil {
-		return ""
-	}
-	if id, ok := ctx.Value(ctxTraceKey{}).(string); ok {
-		return id
-	}
-	return ""
+	return problem.RequestIDFromContext(ctx)
 }

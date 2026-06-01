@@ -11,7 +11,7 @@ import (
 
 // Authorize builds middleware that extracts a payload from each request and
 // asks the authz.Enforcer whether the action is allowed. On extraction error
-// it responds 400, on enforcer error 500, and on denial 403 — all as RFC 7807.
+// it responds 400, on enforcer error 500, and on denial 403 — all as RFC 9457.
 func Authorize(policyEnforcer authz.Enforcer, extractor authz.PayloadExtractor) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

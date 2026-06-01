@@ -96,6 +96,10 @@ func WrapWriter(w http.ResponseWriter) WrapResponseWriter {
 func (rw *responseWriter) Status() int       { return rw.statusCode }
 func (rw *responseWriter) BytesWritten() int { return rw.bytes }
 
+// Unwrap exposes the underlying writer so http.NewResponseController can
+// discover Flush, Hijack, deadlines, etc. through the wrapper (Go 1.20+).
+func (rw *responseWriter) Unwrap() http.ResponseWriter { return rw.ResponseWriter }
+
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)

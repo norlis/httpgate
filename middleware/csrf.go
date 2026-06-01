@@ -39,7 +39,7 @@ func WithBypassPattern(pattern string) CSRFOption {
 }
 
 // WithDenyHandler overrides the default 403 Forbidden response sent when
-// a request is rejected. Use to emit RFC 7807 JSON via presenter.Error or
+// a request is rejected. Use to emit RFC 9457 JSON via presenter.Error or
 // to log the rejection.
 func WithDenyHandler(h http.Handler) CSRFOption {
 	return func(c *csrfConfig) { c.denyHandler = h }

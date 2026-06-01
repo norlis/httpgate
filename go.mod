@@ -1,8 +1,6 @@
 module github.com/norlis/httpgate
 
-go 1.26
-
-toolchain go1.26.3
+go 1.25.1
 
 require (
 	github.com/google/uuid v1.6.0

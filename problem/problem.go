@@ -1,19 +1,22 @@
-// Package problem implements RFC 7807 (Problem Details for HTTP APIs).
-// https://tools.ietf.org/html/rfc7807
+// Package problem implements RFC 9457 (Problem Details for HTTP APIs), which
+// obsoletes RFC 7807. The wire format (application/problem+json) is unchanged;
+// when "type" is omitted it defaults to "about:blank" per the spec.
+// https://www.rfc-editor.org/rfc/rfc9457
 package problem
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"time"
 )
 
-// Detail is the RFC 7807 representation of a single problem occurrence.
+// Detail is the RFC 9457 representation of a single problem occurrence.
 // It satisfies the error interface so it can flow through standard error
 // handling.
 //
-//nolint:errname // RFC 7807 names this type "Problem Detail"; Detail is intentional, not an XxxError.
+//nolint:errname // RFC 9457 names this type "Problem Detail"; Detail is intentional, not an XxxError.
 type Detail struct {
 	// Type is a URI identifying the problem type. Should provide
 	// developer-readable documentation.
@@ -37,10 +40,6 @@ type Detail struct {
 
 	// Timestamp records when the problem was created.
 	Timestamp time.Time `json:"timestamp,omitzero"`
-
-	// StackTrace optionally carries debugging information. Should not be
-	// populated in production responses.
-	StackTrace string `json:"stackTrace,omitempty"`
 }
 
 func (d *Detail) Error() string { return d.Title }
@@ -79,15 +78,46 @@ func WithDetail(detail string) Option { return func(d *Detail) { d.Detail = deta
 // the request context rather than in the X-Request-Id header.
 func WithRequestID(id string) Option { return func(d *Detail) { d.RequestID = id } }
 
-// WithInstance fills Instance from r.URL.Path and (if present) RequestID
-// from the X-Request-Id header.
+// WithInstance fills Instance from r.URL.Path and (if present) RequestID from
+// the request ID stored in the request context (see ContextWithRequestID).
+// This keeps the RequestID aligned with the correlation/trace ID set by
+// middleware, instead of guessing a header name.
 func WithInstance(r *http.Request) Option {
 	return func(d *Detail) {
 		if r == nil {
 			return
 		}
 		d.Instance = r.URL.Path
-		if id := r.Header.Get("X-Request-Id"); id != "" {
+		if id := RequestIDFromContext(r.Context()); id != "" {
+			d.RequestID = id
+		}
+	}
+}
+
+type ctxRequestIDKey struct{}
+
+// ContextWithRequestID returns a copy of ctx carrying the request/correlation
+// ID. Middleware (e.g. TraceID) stores the ID here so problem responses and
+// logs share one identifier without coupling to a specific header.
+func ContextWithRequestID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, ctxRequestIDKey{}, id)
+}
+
+// RequestIDFromContext returns the request ID stored by ContextWithRequestID,
+// or "" if absent.
+func RequestIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	id, _ := ctx.Value(ctxRequestIDKey{}).(string)
+	return id
+}
+
+// WithRequestIDFromContext sets RequestID from the ID stored in ctx. It is a
+// no-op when ctx carries no request ID.
+func WithRequestIDFromContext(ctx context.Context) Option {
+	return func(d *Detail) {
+		if id := RequestIDFromContext(ctx); id != "" {
 			d.RequestID = id
 		}
 	}

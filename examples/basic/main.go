@@ -4,22 +4,17 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
-	"time"
 
-	"github.com/norlis/httpgate/authz"
 	"github.com/norlis/httpgate/authz/opa"
 	"github.com/norlis/httpgate/health"
 	"github.com/norlis/httpgate/middleware"
-	"github.com/norlis/httpgate/presenter"
+	"github.com/norlis/httpgate/server"
 )
 
 const banner = `
@@ -33,11 +28,9 @@ func main() {
 	fmt.Print(banner)
 	logger := newLogger()
 
-	ctx, stop := signal.NotifyContext(
-		context.Background(),
-		os.Interrupt, syscall.SIGTERM,
-	)
-	defer stop()
+	// server.Run installs its own SIGINT/SIGTERM handling; a plain context
+	// is enough for initialization here.
+	ctx := context.Background()
 
 	enforcer, err := opa.New(ctx, opa.Config{
 		Query:        "data.authz.allow",
@@ -72,29 +65,20 @@ func main() {
 		middleware.Authorize(enforcer, extractRoles),
 	)
 
+	// readiness gate: server.Run flips it to 503 on SIGTERM so the LB drains
+	// before connections are closed.
+	ready := health.NewReadiness(health.NewProbe(nil))
+
 	base := http.NewServeMux()
 	base.Handle("GET /status", health.NewStatus("dev"))
 	base.Handle("GET /live", health.NewProbe(nil))
-	base.Handle("GET /ready", health.NewProbe(nil))
+	base.Handle("GET /ready", ready)
+	base.HandleFunc("GET /me/permissions", permissionsHandler(enforcer, logger))
 
 	api := http.NewServeMux()
-	api.HandleFunc("GET /test", func(w http.ResponseWriter, r *http.Request) {
-		presenter.JSON(
-			w, r,
-			map[string]string{"text": "Hello World"},
-			presenter.WithStatusCode(http.StatusAccepted),
-			presenter.WithHeader("x-test", "1"),
-		)
-	})
-	api.HandleFunc("GET /test-err", func(w http.ResponseWriter, r *http.Request) {
-		presenter.Error(
-			w, r, errors.New("error occurred"),
-			presenter.WithStatus(http.StatusBadRequest),
-		)
-	})
-	api.HandleFunc("GET /panic", func(w http.ResponseWriter, r *http.Request) {
-		panic(errors.New("panic test"))
-	})
+	api.HandleFunc("GET /test", helloHandler())
+	api.HandleFunc("GET /test-err", errorHandler())
+	api.HandleFunc("GET /panic", panicHandler())
 
 	root := http.NewServeMux()
 	root.Handle("/", public.Then(base))
@@ -104,28 +88,18 @@ func main() {
 	protocols.SetHTTP1(true)
 	protocols.SetHTTP2(true)
 
-	srv := &http.Server{
-		Addr:              ":8881",
-		Handler:           root,
-		ReadHeaderTimeout: 30 * time.Second,
-		Protocols:         protocols,
-	}
-
-	go func() {
-		logger.Info("http listening", slog.String("addr", srv.Addr))
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("http serve", slog.Any("error", err))
-			stop()
-		}
-	}()
-
-	<-ctx.Done()
-	logger.Info("shutting down", slog.Any("cause", context.Cause(ctx)))
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		logger.Error("http shutdown", slog.Any("error", err))
+	srv := server.New(
+		root,
+		server.WithAddr(":8881"),
+		server.With(func(s *http.Server) { s.Protocols = protocols }),
+	)
+	if err := server.Run(
+		ctx, srv,
+		server.WithLogger(logger),
+		server.OnShutdown(ready.MarkDraining),
+	); err != nil {
+		logger.Error("server", slog.Any("error", err))
+		os.Exit(1)
 	}
 	logger.Info("bye")
 }
@@ -146,21 +120,3 @@ func newLogger() *slog.Logger {
 	})
 	return slog.New(h)
 }
-
-// extractRoles reads `X-Roles` (CSV) for demo purposes. In production,
-// parse a JWT or session cookie here.
-func extractRoles(r *http.Request) (map[string]any, error) {
-	raw := r.Header.Get("X-Roles")
-	roles := []string{}
-	if raw != "" {
-		for p := range strings.SplitSeq(raw, ",") {
-			if p = strings.TrimSpace(p); p != "" {
-				roles = append(roles, p)
-			}
-		}
-	}
-	return map[string]any{"roles": roles}, nil
-}
-
-// Compile-time check: PayloadExtractor signature.
-var _ authz.PayloadExtractor = extractRoles

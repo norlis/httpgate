@@ -384,3 +384,50 @@ client.test("cors preflight: Allow-Methods includes GET", () => {
         "Allow-Methods = " + methods);
 });
 %}
+
+
+### ──────────────────────────────────────────────────────────────────
+### /me/permissions — capability hints (opa.Client.Permissions +
+### AllowedResources). Roles come from X-Roles (a JWT stand-in). This is a
+### UX aid for the frontend; Authorize still enforces every /api/ request.
+### ──────────────────────────────────────────────────────────────────
+
+### admin → permissions ["super-admin"], resources = the super-admin regex
+GET {{host}}/me/permissions
+X-Roles: admin
+
+> {%
+client.test("me/permissions (admin): 200 + JSON", () => {
+    client.assert(response.status === 200, "want 200, got " + response.status);
+    client.assert(response.contentType.mimeType === "application/json",
+        "content-type = " + response.contentType.mimeType);
+});
+client.test("me/permissions (admin): permissions = [super-admin]", () => {
+    const p = response.body.permissions;
+    client.assert(Array.isArray(p) && p.length === 1 && p[0] === "super-admin",
+        "permissions = " + JSON.stringify(p));
+});
+client.test("me/permissions (admin): resources include the super-admin pattern", () => {
+    const r = response.body.resources;
+    client.assert(Array.isArray(r) && r.includes("(GET|POST|PUT|DELETE|HEAD):/.*"),
+        "resources = " + JSON.stringify(r));
+});
+%}
+
+###
+
+### no roles → anonymous default: permissions ["whitelist"]
+GET {{host}}/me/permissions
+
+> {%
+client.test("me/permissions (anon): permissions = [whitelist]", () => {
+    const p = response.body.permissions;
+    client.assert(Array.isArray(p) && p.length === 1 && p[0] === "whitelist",
+        "permissions = " + JSON.stringify(p));
+});
+client.test("me/permissions (anon): resources are the whitelist GET paths", () => {
+    const r = response.body.resources;
+    client.assert(Array.isArray(r) && r.includes("GET:/status"),
+        "resources = " + JSON.stringify(r));
+});
+%}

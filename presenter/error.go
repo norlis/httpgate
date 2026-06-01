@@ -1,4 +1,4 @@
-// Package presenter writes HTTP responses: JSON, plain text and RFC 7807
+// Package presenter writes HTTP responses: JSON, plain text and RFC 9457
 // problem+json errors, all via small free functions configured with options.
 package presenter
 
@@ -37,9 +37,10 @@ func WithLogger(l *slog.Logger) ErrorOption {
 	}
 }
 
-// Error writes an RFC 7807 problem+json error response. Defaults: 500 with
-// the http.StatusText title. If the status is 5xx and a logger has been
-// provided via WithLogger, the error is logged at Error level.
+// Error writes an RFC 9457 problem+json error response. Defaults: 500 with
+// the http.StatusText title. Server faults (5xx) never surface the raw error
+// to the client — it is logged instead (when WithLogger is set); client
+// errors (4xx) surface the message, which is safe and useful.
 func Error(w http.ResponseWriter, r *http.Request, err error, opts ...ErrorOption) {
 	cfg := &errorConfig{status: http.StatusInternalServerError}
 	for _, opt := range opts {
@@ -48,24 +49,43 @@ func Error(w http.ResponseWriter, r *http.Request, err error, opts ...ErrorOptio
 	if cfg.title == "" {
 		cfg.title = http.StatusText(cfg.status)
 	}
-	if cfg.detail == "" && err != nil {
-		cfg.detail = err.Error()
+
+	if cfg.status >= 500 {
+		logServerError(cfg, err)
+	} else {
+		cfg.detail = clientDetail(cfg.detail, err)
 	}
-	if cfg.detail == "" {
-		cfg.detail = "unknown error"
-	}
-	if cfg.status >= 500 && cfg.logger != nil {
-		cfg.logger.Error(
-			"server error",
-			slog.Any("error", err),
-			slog.Int("status", cfg.status),
-			slog.String("detail", cfg.detail),
-		)
-	}
+
 	pd := problem.New(
 		cfg.title, cfg.status,
 		problem.WithDetail(cfg.detail),
 		problem.WithInstance(r),
 	)
 	problem.Respond(w, pd)
+}
+
+// logServerError logs a 5xx fault with its real error, if a logger is set.
+// The raw error is deliberately kept out of the client response.
+func logServerError(cfg *errorConfig, err error) {
+	if cfg.logger == nil {
+		return
+	}
+	cfg.logger.Error(
+		"server error",
+		slog.Any("error", err),
+		slog.Int("status", cfg.status),
+	)
+}
+
+// clientDetail returns the detail to surface for a client (4xx) error: an
+// explicit detail wins, then the error message, then a generic fallback.
+func clientDetail(detail string, err error) string {
+	switch {
+	case detail != "":
+		return detail
+	case err != nil:
+		return err.Error()
+	default:
+		return "unknown error"
+	}
 }

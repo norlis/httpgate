@@ -58,11 +58,21 @@ migrate once.
   boot on malformed trusted origins.
 - **`middleware.WrapResponseWriter.BytesWritten() int`** — useful for
   request logging.
-- **`opa.Client.Data(ctx, path) (any, error)`** — declarative-data
-  introspection. Reads `data.<path>` from the loaded bundle (bracket
-  notation, so segments that collide with Rego reserved words like
-  `not`, `if`, `in` work). Caches the prepared query per path,
-  single-prepare under concurrent first-access (`sync.Once`).
+- **`opa.Client.Query(ctx, query string, in authz.Input) (any, error)`** —
+  evaluates a developer-supplied constant Rego query against `in` via
+  `rego.EvalInput`. Prepared queries are cached per query string,
+  single-prepare under concurrent first-access (`sync.Once`). An undefined
+  query yields `(nil, nil)`. For static reads pass a zero `Input`
+  (`Query(ctx, "data.roles", authz.Input{})`). Replaces the earlier
+  injection-prone `Data(ctx, path)` (which built the query from caller path
+  segments).
+- **`opa.Client.Permissions(ctx, in) ([]string, error)`** and
+  **`opa.Client.AllowedResources(ctx, in) ([]string, error)`** — capability
+  hints for frontends: permission names and flattened regex route patterns
+  granted to `in`'s roles (rules `data.authz.permissions` /
+  `data.authz.allowed_resources`). Roles must come from the caller's
+  authenticated context; these are UI hints, not a security boundary
+  (`IsAllowed` still enforces every request).
 - **`problem.WithRequestID(id string) Option`** — set RequestID directly
   without passing `*http.Request`.
 
