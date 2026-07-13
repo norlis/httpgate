@@ -52,7 +52,7 @@ func main() {
 			middleware.WithMessage(http.StatusMethodNotAllowed, "method not allowed for this resource"),
 		),
 		middleware.Recover(logger),
-		middleware.RequestLogger(logger),
+		middleware.RequestLogger(logger, middleware.WithSkipPaths("/status", "/live", "/ready")),
 		middleware.AllowAll(),
 	)
 	public := commons
