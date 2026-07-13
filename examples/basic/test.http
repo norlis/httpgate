@@ -1,0 +1,433 @@
+### httpgate example — test requests + assertions
+### JetBrains HTTP Client format. The `> {% ... %}` blocks are response
+### handler scripts that run after each request — open the "Run with"
+### gutter icon and pick "Run all requests in file" to execute them all.
+###
+### Start the server first: `go run ./examples/basic` (from repo root).
+
+@host = http://localhost:8881
+@trustedOrigin = https://app.example.com
+
+
+### ──────────────────────────────────────────────────────────────────
+### Public probes (no auth, no CSRF, GET only)
+### ──────────────────────────────────────────────────────────────────
+
+### /status — build info + uptime
+GET {{host}}/status
+Accept: application/json
+
+> {%
+client.test("status: 200", () => {
+    client.assert(response.status === 200, "want 200, got " + response.status);
+});
+client.test("status: JSON content-type", () => {
+    client.assert(
+        response.contentType.mimeType === "application/json",
+        "content-type = " + response.contentType.mimeType
+    );
+});
+client.test("status: payload has required fields", () => {
+    const body = response.body;
+    client.assert(typeof body.uptime === "number" || typeof body.uptime === "string",
+        "missing uptime");
+    client.assert(typeof body.hostname === "string", "missing hostname");
+    client.assert(typeof body.version === "string", "missing version");
+});
+%}
+
+###
+
+### /live — liveness probe (200 OK, no checkers wired → plain "OK")
+GET {{host}}/live
+
+> {%
+client.test("live: 200", () => {
+    client.assert(response.status === 200, "want 200, got " + response.status);
+});
+%}
+
+###
+
+### /ready — readiness probe (200 OK, no checkers wired)
+GET {{host}}/ready
+
+> {%
+client.test("ready: 200", () => {
+    client.assert(response.status === 200, "want 200, got " + response.status);
+});
+%}
+
+
+### ──────────────────────────────────────────────────────────────────
+### TraceID middleware
+### Sending no X-Request-ID → server generates a UUIDv7 and echoes it.
+### Sending a valid UUID → server echoes it unchanged.
+### Sending garbage → server replaces with a fresh UUIDv7.
+### ──────────────────────────────────────────────────────────────────
+
+### Auto-generated trace ID
+GET {{host}}/status
+
+> {%
+const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+client.test("trace: auto-generated UUID returned in header", () => {
+    const id = response.headers.valueOf("X-Request-Id");
+    client.assert(id !== null && uuidRegex.test(id),
+        "X-Request-Id = " + id);
+    client.global.set("autoTraceId", id);
+});
+%}
+
+###
+
+### Provide a valid UUID — server should echo it in the response header
+GET {{host}}/status
+X-Request-ID: 0190f5a4-1234-7c89-b0d1-1234567890ab
+
+> {%
+client.test("trace: echoes valid UUID unchanged", () => {
+    const id = response.headers.valueOf("X-Request-Id");
+    client.assert(id === "0190f5a4-1234-7c89-b0d1-1234567890ab",
+        "echo = " + id);
+});
+%}
+
+###
+
+### Garbage trace ID — server replaces it with a fresh UUIDv7
+GET {{host}}/status
+X-Request-ID: not-a-uuid
+
+> {%
+const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+client.test("trace: garbage replaced with UUID", () => {
+    const id = response.headers.valueOf("X-Request-Id");
+    client.assert(id !== "not-a-uuid", "garbage should be replaced");
+    client.assert(uuidRegex.test(id), "replacement = " + id);
+});
+%}
+
+
+### ──────────────────────────────────────────────────────────────────
+### Protected API (under /api/)
+### Pipeline:  TraceID → InterceptStatus → Recover → RequestLogger →
+###           CORS(AllowAll) → CSRFProtect → Authorize(OPA)
+### Authorize requires roles. The extractor reads X-Roles (CSV).
+### ──────────────────────────────────────────────────────────────────
+
+### /api/test — happy path with admin role (handler writes 202)
+GET {{host}}/api/test
+X-Roles: admin
+
+> {%
+client.test("api/test (admin): 202", () => {
+    client.assert(response.status === 202,
+        "want 202, got " + response.status);
+});
+client.test("api/test (admin): X-Test custom header echoed", () => {
+    client.assert(response.headers.valueOf("X-Test") === "1",
+        "X-Test = " + response.headers.valueOf("X-Test"));
+});
+client.test("api/test (admin): body has text=Hello World", () => {
+    client.assert(response.body.text === "Hello World",
+        "text = " + response.body.text);
+});
+%}
+
+###
+
+### /api/test — without roles (depends on policy; demo policy is permissive)
+GET {{host}}/api/test
+
+> {%
+client.test("api/test (no roles): policy decides", () => {
+    // The demo policy may allow this. We only assert it's one of the
+    // expected outcomes (200/202 if allowed, 403 if denied).
+    client.assert(
+        [200, 202, 403].includes(response.status),
+        "unexpected status " + response.status
+    );
+});
+%}
+
+###
+
+### /api/test — multiple roles via CSV
+GET {{host}}/api/test
+X-Roles: admin, viewer, billing
+
+> {%
+client.test("api/test (multi-role): 202", () => {
+    client.assert(response.status === 202,
+        "want 202, got " + response.status);
+});
+%}
+
+###
+
+### /api/test-err — handler intentionally returns 400 via presenter.Error
+GET {{host}}/api/test-err
+X-Roles: admin
+
+> {%
+client.test("api/test-err: 400", () => {
+    client.assert(response.status === 400,
+        "want 400, got " + response.status);
+});
+client.test("api/test-err: problem+json body", () => {
+    client.assert(
+        response.contentType.mimeType === "application/problem+json",
+        "content-type = " + response.contentType.mimeType
+    );
+    client.assert(response.body.status === 400, "body.status = " + response.body.status);
+    client.assert(typeof response.body.title === "string", "missing title");
+    client.assert(typeof response.body.timestamp === "string", "missing timestamp");
+});
+%}
+
+###
+
+### /api/panic — handler panics; middleware.Recover catches → 500 problem+json
+GET {{host}}/api/panic
+X-Roles: admin
+
+> {%
+client.test("api/panic: 500", () => {
+    client.assert(response.status === 500,
+        "want 500, got " + response.status);
+});
+client.test("api/panic: problem+json body via InterceptStatus", () => {
+    // The 500 is intercepted by InterceptStatus, which emits an RFC 7807
+    // problem body. The body must therefore advertise application/problem+json.
+    client.assert(
+        response.contentType.mimeType === "application/problem+json",
+        "content-type = " + response.contentType.mimeType
+    );
+    client.assert(response.body.status === 500, "body.status = " + response.body.status);
+});
+%}
+
+
+### ──────────────────────────────────────────────────────────────────
+### CSRFProtect vs Authorize (chain-order verification)
+###
+### The demo policy in policies/authz/ whitelists only GETs to specific
+### paths (GET:/api/test, GET:/api/test-err, GET:/api/panic). EVERY POST
+### is denied by OPA — there is no "POST is allowed for admin" rule in
+### the demo. So testing POSTs here is really testing chain order:
+###
+###   - Cross-site POST without a trusted Origin → CSRFProtect rejects it
+###     BEFORE OPA runs. Body Content-Type = text/plain (stdlib default).
+###   - Trusted-origin or same-origin POST → CSRFProtect lets it through,
+###     OPA denies it. Body Content-Type = application/problem+json.
+###
+### Distinguishing them by Content-Type is the actual edge case we care
+### about: it proves CSRF runs before Authorize, and that each layer's
+### deny path is shaped correctly.
+### ──────────────────────────────────────────────────────────────────
+
+### Same-origin POST → passes CSRF, OPA denies (RFC 7807 body)
+POST {{host}}/api/test
+X-Roles: admin
+Sec-Fetch-Site: same-origin
+Content-Type: application/json
+
+{}
+
+> {%
+client.test("chain: same-origin POST → 403 from OPA, problem+json", () => {
+    client.assert(response.status === 403,
+        "want 403, got " + response.status);
+    client.assert(
+        response.contentType.mimeType === "application/problem+json",
+        "OPA deny should emit problem+json; got " + response.contentType.mimeType
+    );
+});
+%}
+
+###
+
+### Cross-origin POST without trusted origin → CSRFProtect blocks (text/plain)
+POST {{host}}/api/test
+X-Roles: admin
+Sec-Fetch-Site: cross-site
+Origin: https://evil.example.com
+Content-Type: application/json
+
+{}
+
+> {%
+client.test("chain: untrusted cross-origin POST → 403 from CSRF (text/plain)", () => {
+    client.assert(response.status === 403,
+        "want 403, got " + response.status);
+    // stdlib's CrossOriginProtection default deny handler writes text/plain.
+    // This distinguishes a CSRF block from an OPA deny.
+    client.assert(
+        response.contentType.mimeType === "text/plain",
+        "CSRF deny should be text/plain (stdlib default); got " +
+        response.contentType.mimeType
+    );
+});
+%}
+
+###
+
+### Cross-origin POST WITH trusted origin → CSRF passes, OPA denies (problem+json)
+POST {{host}}/api/test
+X-Roles: admin
+Sec-Fetch-Site: cross-site
+Origin: {{trustedOrigin}}
+Content-Type: application/json
+
+{}
+
+> {%
+client.test("chain: trusted cross-origin POST → 403 from OPA, problem+json", () => {
+    client.assert(response.status === 403,
+        "want 403, got " + response.status);
+    client.assert(
+        response.contentType.mimeType === "application/problem+json",
+        "OPA deny should emit problem+json; got " + response.contentType.mimeType
+    );
+});
+%}
+
+
+### ──────────────────────────────────────────────────────────────────
+### InterceptStatus — converts plain stdlib statuses into RFC 7807
+### ──────────────────────────────────────────────────────────────────
+
+### Unknown public path → 404 with custom "resource not found" message
+GET {{host}}/this-does-not-exist
+
+> {%
+client.test("intercept: 404 with custom message + problem+json", () => {
+    client.assert(response.status === 404,
+        "want 404, got " + response.status);
+    client.assert(
+        response.contentType.mimeType === "application/problem+json",
+        "content-type = " + response.contentType.mimeType
+    );
+    client.assert(response.body.detail === "resource not found",
+        "detail = " + response.body.detail);
+});
+%}
+
+###
+
+### Wrong method on a known public path → 405 with custom message
+POST {{host}}/status
+Sec-Fetch-Site: same-origin
+Content-Type: application/json
+
+{}
+
+> {%
+client.test("intercept: 405 with custom message + problem+json", () => {
+    client.assert(response.status === 405,
+        "want 405, got " + response.status);
+    client.assert(
+        response.contentType.mimeType === "application/problem+json",
+        "content-type = " + response.contentType.mimeType
+    );
+    client.assert(response.body.detail === "method not allowed for this resource",
+        "detail = " + response.body.detail);
+});
+%}
+
+###
+
+### Unknown path under /api/ — OPA denies (not in whitelist) BEFORE mux runs
+### so we never reach the InterceptStatus 404. This documents the chain:
+### Authorize sits between the user and the mux.
+GET {{host}}/api/does-not-exist
+X-Roles: admin
+
+> {%
+client.test("chain: unknown /api/ path → 403 from OPA (not 404 from mux)", () => {
+    client.assert(response.status === 403,
+        "want 403 (OPA denies unwhitelisted path), got " + response.status);
+    client.assert(
+        response.contentType.mimeType === "application/problem+json",
+        "content-type = " + response.contentType.mimeType
+    );
+});
+%}
+
+
+### ──────────────────────────────────────────────────────────────────
+### CORS preflight (browser flow)
+### AllowAll() permits everything; verify the headers come back.
+### ──────────────────────────────────────────────────────────────────
+
+OPTIONS {{host}}/api/test
+Origin: https://anywhere.example.com
+Access-Control-Request-Method: GET
+Access-Control-Request-Headers: X-Roles
+
+> {%
+client.test("cors preflight: 200", () => {
+    client.assert(response.status === 200,
+        "want 200, got " + response.status);
+});
+client.test("cors preflight: Access-Control-Allow-Origin set", () => {
+    const allowOrigin = response.headers.valueOf("Access-Control-Allow-Origin");
+    client.assert(
+        allowOrigin === "*" || allowOrigin === "https://anywhere.example.com",
+        "Allow-Origin = " + allowOrigin
+    );
+});
+client.test("cors preflight: Allow-Methods includes GET", () => {
+    const methods = response.headers.valueOf("Access-Control-Allow-Methods");
+    client.assert(methods !== null && methods.toUpperCase().includes("GET"),
+        "Allow-Methods = " + methods);
+});
+%}
+
+
+### ──────────────────────────────────────────────────────────────────
+### /me/permissions — capability hints (opa.Client.Permissions +
+### AllowedResources). Roles come from X-Roles (a JWT stand-in). This is a
+### UX aid for the frontend; Authorize still enforces every /api/ request.
+### ──────────────────────────────────────────────────────────────────
+
+### admin → permissions ["super-admin"], resources = the super-admin regex
+GET {{host}}/me/permissions
+X-Roles: admin
+
+> {%
+client.test("me/permissions (admin): 200 + JSON", () => {
+    client.assert(response.status === 200, "want 200, got " + response.status);
+    client.assert(response.contentType.mimeType === "application/json",
+        "content-type = " + response.contentType.mimeType);
+});
+client.test("me/permissions (admin): permissions = [super-admin]", () => {
+    const p = response.body.permissions;
+    client.assert(Array.isArray(p) && p.length === 1 && p[0] === "super-admin",
+        "permissions = " + JSON.stringify(p));
+});
+client.test("me/permissions (admin): resources include the super-admin pattern", () => {
+    const r = response.body.resources;
+    client.assert(Array.isArray(r) && r.includes("(GET|POST|PUT|DELETE|HEAD):/.*"),
+        "resources = " + JSON.stringify(r));
+});
+%}
+
+###
+
+### no roles → anonymous default: permissions ["whitelist"]
+GET {{host}}/me/permissions
+
+> {%
+client.test("me/permissions (anon): permissions = [whitelist]", () => {
+    const p = response.body.permissions;
+    client.assert(Array.isArray(p) && p.length === 1 && p[0] === "whitelist",
+        "permissions = " + JSON.stringify(p));
+});
+client.test("me/permissions (anon): resources are the whitelist GET paths", () => {
+    const r = response.body.resources;
+    client.assert(Array.isArray(r) && r.includes("GET:/status"),
+        "resources = " + JSON.stringify(r));
+});
+%}

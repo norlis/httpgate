@@ -33,3 +33,5 @@ go.work.sum
 **.DS_Store
 /deployments/development/tempo-data/*
 /bin
+.task-baselines/
+/basic
