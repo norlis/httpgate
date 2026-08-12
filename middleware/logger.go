@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/norlis/httpgate/logging"
 )
 
 type requestLoggerConfig struct {
@@ -29,9 +31,21 @@ func WithSkipPaths(paths ...string) RequestLoggerOption {
 	}
 }
 
-// RequestLogger builds middleware that logs one structured "request" line per
-// request, including status, duration, URI, method, remote address and bytes.
-// Paths registered via WithSkipPaths are served without a log line.
+// RequestLogger builds middleware that logs one "request completed" line per
+// request with the standard fields: http.request.method, url.path,
+// http.response.status_code, http.response.body.size, client.address and
+// event.duration (nanoseconds). Run TraceContext earlier in the chain so the
+// line carries trace_id/span_id. Paths registered via WithSkipPaths are
+// served without a log line.
+//
+// Chain order matters: RequestLogger must come after TraceContext (to carry
+// trace_id/span_id) and BEFORE Recover — i.e. RequestLogger must wrap
+// Recover, not the other way around — so that a panic's recovered 500 status
+// is captured in http.response.status_code instead of being written to the
+// outer ResponseWriter after the access line's status has already been read.
+// Caveat: client.address is r.RemoteAddr verbatim, so it includes the port,
+// and behind a load balancer or reverse proxy it is the proxy's address, not
+// the original client's — parse X-Forwarded-For yourself if you need that.
 func RequestLogger(log *slog.Logger, opts ...RequestLoggerOption) func(next http.Handler) http.Handler {
 	cfg := &requestLoggerConfig{}
 	for _, opt := range opts {
@@ -48,19 +62,16 @@ func RequestLogger(log *slog.Logger, opts ...RequestLoggerOption) func(next http
 			ww := WrapWriter(w)
 			t0 := time.Now()
 			defer func() {
-				log.With(slog.String("logger", "middleware")).
-					Info(
-						"request",
-						slog.Group(
-							"http",
-							slog.Int("status", ww.Status()),
-							slog.String("duration", time.Since(t0).String()),
-							slog.String("uri", r.RequestURI),
-							slog.String("method", r.Method),
-							slog.String("remoteAddr", r.RemoteAddr),
-							slog.Int("bytes", ww.BytesWritten()),
-						),
-					)
+				log.InfoContext(
+					r.Context(),
+					"request completed",
+					slog.String(logging.KeyHTTPRequestMethod, r.Method),
+					slog.String(logging.KeyURLPath, r.URL.Path),
+					slog.Int(logging.KeyHTTPResponseStatusCode, ww.Status()),
+					slog.Int(logging.KeyHTTPResponseBodySize, ww.BytesWritten()),
+					slog.String(logging.KeyClientAddress, r.RemoteAddr),
+					slog.Int64(logging.KeyEventDuration, time.Since(t0).Nanoseconds()),
+				)
 			}()
 
 			next.ServeHTTP(ww, r)

@@ -194,7 +194,7 @@ func (c *corsAdapter) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Check for preflight request
 		if r.Method == http.MethodOptions && r.Header.Get(headerAccessControlRequestMethod) != "" {
-			c.logger.Debug("Handling preflight request")
+			c.logger.DebugContext(r.Context(), "preflight request handled")
 			c.handlePreflight(w, r)
 			if c.optionsPassthrough {
 				next.ServeHTTP(w, r)
@@ -204,7 +204,6 @@ func (c *corsAdapter) middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		c.logger.Debug("Handling actual request")
 		c.handleActualRequest(w, r)
 		next.ServeHTTP(w, r)
 	})
@@ -221,24 +220,24 @@ func (c *corsAdapter) handlePreflight(w http.ResponseWriter, r *http.Request) {
 	headers.Add(headerVary, headerAccessControlRequestHeaders)
 
 	if origin == "" {
-		c.logger.Debug("Preflight aborted: empty origin")
+		c.logger.DebugContext(r.Context(), "preflight rejected", slog.String("cors.reason", "empty origin"))
 		return
 	}
 
 	if !c.engine.isOriginAllowed(r, origin) {
-		c.logger.Debug("Preflight aborted: origin not allowed", slog.String("origin", origin))
+		c.logger.DebugContext(r.Context(), "preflight rejected", slog.String("cors.reason", "origin not allowed"), slog.String("cors.origin", origin))
 		return
 	}
 
 	reqMethod := r.Header.Get(headerAccessControlRequestMethod)
 	if !c.engine.isMethodAllowed(reqMethod) {
-		c.logger.Debug("Preflight aborted: method not allowed", slog.String("method", reqMethod))
+		c.logger.DebugContext(r.Context(), "preflight rejected", slog.String("cors.reason", "method not allowed"), slog.String("cors.method", reqMethod))
 		return
 	}
 
 	reqHeaders := parseHeaderList(r.Header.Get(headerAccessControlRequestHeaders))
 	if !c.engine.areHeadersAllowed(reqHeaders) {
-		c.logger.Debug("Preflight aborted: headers not allowed", slog.Any("headers", reqHeaders))
+		c.logger.DebugContext(r.Context(), "preflight rejected", slog.String("cors.reason", "headers not allowed"), slog.Any("cors.headers", reqHeaders))
 		return
 	}
 
@@ -271,17 +270,17 @@ func (c *corsAdapter) handleActualRequest(w http.ResponseWriter, r *http.Request
 	headers.Add(headerVary, headerOrigin)
 
 	if origin == "" {
-		c.logger.Debug("Actual request: no headers added, missing origin")
+		c.logger.DebugContext(r.Context(), "cors headers skipped", slog.String("cors.reason", "empty origin"))
 		return
 	}
 
 	if !c.engine.isOriginAllowed(r, origin) {
-		c.logger.Debug("Actual request: no headers added, origin not allowed", slog.String("origin", origin))
+		c.logger.DebugContext(r.Context(), "cors headers skipped", slog.String("cors.reason", "origin not allowed"), slog.String("cors.origin", origin))
 		return
 	}
 
 	if !c.engine.isMethodAllowed(r.Method) {
-		c.logger.Debug("Actual request: no headers added, method not allowed", slog.String("method", r.Method))
+		c.logger.DebugContext(r.Context(), "cors headers skipped", slog.String("cors.reason", "method not allowed"), slog.String("cors.method", r.Method))
 		return
 	}
 

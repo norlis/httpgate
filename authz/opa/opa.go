@@ -63,14 +63,15 @@ func New(ctx context.Context, cfg Config, opts ...Option) (*Client, error) {
 	for _, opt := range opts {
 		opt(c)
 	}
-	c.logger = c.logger.With(slog.String("logger", "opa"), slog.String("query", cfg.Query))
+	c.logger = c.logger.With(slog.String("query", cfg.Query))
 
 	prep, err := rego.New(
 		rego.Query(cfg.Query),
 		rego.Load(append([]string{cfg.PoliciesPath}, cfg.DataFiles...), nil),
 	).PrepareForEval(ctx)
 	if err != nil {
-		c.logger.Error("prepare query", slog.Any("error", err))
+		// Not logged here: the wrapped error is returned to the caller, who
+		// logs it once (log-and-rethrow is forbidden by the logging standard).
 		return nil, fmt.Errorf("opa: prepare query: %w", err)
 	}
 	c.query = prep
