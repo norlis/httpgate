@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+
+	"github.com/norlis/httpgate/logging"
 )
 
 // JSON marshals v to JSON and writes it to w. Defaults: 200 OK,
@@ -21,6 +23,6 @@ func JSON(w http.ResponseWriter, r *http.Request, v any, opts ...ResponseOption)
 	}
 	w.WriteHeader(cfg.statusCode)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
-		slog.Default().Error("presenter: encode json", slog.Any("error", err))
+		slog.Default().ErrorContext(r.Context(), "json encoding failed", logging.Err(err))
 	}
 }

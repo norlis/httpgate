@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/norlis/httpgate/logging"
 	"github.com/norlis/httpgate/problem"
 )
 
@@ -51,7 +52,7 @@ func Error(w http.ResponseWriter, r *http.Request, err error, opts ...ErrorOptio
 	}
 
 	if cfg.status >= 500 {
-		logServerError(cfg, err)
+		logServerError(r, cfg, err)
 	} else {
 		cfg.detail = clientDetail(cfg.detail, err)
 	}
@@ -64,16 +65,17 @@ func Error(w http.ResponseWriter, r *http.Request, err error, opts ...ErrorOptio
 	problem.Respond(w, pd)
 }
 
-// logServerError logs a 5xx fault with its real error, if a logger is set.
-// The raw error is deliberately kept out of the client response.
-func logServerError(cfg *errorConfig, err error) {
+// logServerError logs a 5xx fault once, as the standard structured error
+// object. The raw error is deliberately kept out of the client response.
+func logServerError(r *http.Request, cfg *errorConfig, err error) {
 	if cfg.logger == nil {
 		return
 	}
-	cfg.logger.Error(
+	cfg.logger.ErrorContext(
+		r.Context(),
 		"server error",
-		slog.Any("error", err),
-		slog.Int("status", cfg.status),
+		logging.Err(err),
+		slog.Int(logging.KeyHTTPResponseStatusCode, cfg.status),
 	)
 }
 

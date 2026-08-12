@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/norlis/httpgate/logging"
 )
 
 // TestError_5xxDoesNotLeakInternalError is the regression test for the
@@ -77,5 +79,32 @@ func TestError_appliesStatusAndTitle(t *testing.T) {
 	// 4xx are client errors: the message is safe and useful to surface.
 	if pd["detail"] != "bad input" {
 		t.Fatalf("detail = %v, want bad input (4xx should surface the error)", pd["detail"])
+	}
+}
+
+func TestError_LogsStructuredServerError(t *testing.T) {
+	t.Parallel()
+	buf := &bytes.Buffer{}
+	log := logging.New(buf)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/payments", nil)
+	Error(rec, req, errors.New("db down"), WithLogger(log))
+
+	var m map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &m); err != nil {
+		t.Fatalf("log line is not valid JSON: %v\n%s", err, buf.String())
+	}
+	if m[logging.KeyMessage] != "server error" {
+		t.Fatalf("message = %v", m[logging.KeyMessage])
+	}
+	if m[logging.KeyErrorType] != "*errors.errorString" {
+		t.Fatalf("error.type = %v", m[logging.KeyErrorType])
+	}
+	if m[logging.KeyErrorMessage] != "db down" {
+		t.Fatalf("error.message = %v", m[logging.KeyErrorMessage])
+	}
+	if m[logging.KeyHTTPResponseStatusCode] != float64(http.StatusInternalServerError) {
+		t.Fatalf("http.response.status_code = %v", m[logging.KeyHTTPResponseStatusCode])
 	}
 }

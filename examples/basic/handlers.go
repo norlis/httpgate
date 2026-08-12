@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -69,6 +70,30 @@ func errorHandler() http.HandlerFunc {
 func panicHandler() http.HandlerFunc {
 	return func(_ http.ResponseWriter, _ *http.Request) {
 		panic(errors.New("panic test"))
+	}
+}
+
+// outboundHandler calls the service's own /status endpoint through a traced
+// client, demonstrating traceparent propagation: the nested response echoes
+// this request's trace id in X-Request-ID.
+func outboundHandler(client *http.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "http://localhost:8881/status", http.NoBody)
+		if err != nil {
+			presenter.Error(w, r, err)
+			return
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			presenter.Error(w, r, fmt.Errorf("upstream call failed: %w", err), presenter.WithStatus(http.StatusBadGateway))
+			return
+		}
+		defer res.Body.Close()
+
+		presenter.JSON(w, r, map[string]any{
+			"upstream.status":   res.StatusCode,
+			"upstream.trace_id": res.Header.Get("X-Request-ID"),
+		})
 	}
 }
 

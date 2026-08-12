@@ -1,11 +1,8 @@
 module github.com/norlis/httpgate
 
-go 1.25.1
+go 1.26
 
-require (
-	github.com/google/uuid v1.6.0
-	github.com/open-policy-agent/opa v1.17.0
-)
+require github.com/open-policy-agent/opa v1.17.0
 
 require (
 	github.com/agnivade/levenshtein v1.2.1 // indirect
@@ -15,6 +12,7 @@ require (
 	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
 	github.com/google/flatbuffers v25.12.19+incompatible // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/lestrrat-go/blackmagic v1.0.4 // indirect
 	github.com/lestrrat-go/dsig v1.3.0 // indirect

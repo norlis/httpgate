@@ -1,16 +1,16 @@
 # httpgate
 
-A small, idiomatic Go library of `net/http` building blocks: middlewares (trace, logger, recover, CORS, CSRF protection, OPA-based authorization, status interceptor), JSON / problem+json response helpers, RFC 9457 problem details, and liveness/readiness probes.
+A small, idiomatic Go library of `net/http` building blocks: middlewares (TraceContext for W3C Trace Context, logger, recover, CORS, CSRF protection, OPA-based authorization, status interceptor), JSON / problem+json response helpers, RFC 9457 problem details, and liveness/readiness probes.
 
 Built on the standard library plus `log/slog` for logging.
 
 ## Install
 
 ```bash
-go get github.com/norlis/httpgate@v1.0.0
+go get github.com/norlis/httpgate@v1.1.0
 ```
 
-Requires Go 1.25.1+.
+Requires Go 1.26+.
 
 ## Quick start
 
@@ -18,19 +18,23 @@ Requires Go 1.25.1+.
 package main
 
 import (
-	"log/slog"
 	"net/http"
 	"os"
 
+	"github.com/norlis/httpgate/logging"
 	"github.com/norlis/httpgate/middleware"
 	"github.com/norlis/httpgate/presenter"
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logger := logging.New(
+		os.Stdout,
+		logging.WithService("hello-service", "1.0.0"),
+		logging.WithEnvironment("production"),
+	)
 
 	chain := middleware.New(
-		middleware.TraceID(),
+		middleware.TraceContext(),
 		middleware.RequestLogger(logger),
 		middleware.Recover(logger),
 	)
@@ -52,13 +56,15 @@ extractor.
 
 | Package | What it does |
 |---|---|
-| `middleware` | `Chain` (alice-style), `TraceID`, `RequestLogger`, `Recover`, `CORS`, `CSRFProtect`, `Authorize`, `InterceptStatus` |
+| `middleware` | `Chain` (alice-style), `TraceContext`, `RequestLogger`, `Recover`, `CORS`, `CSRFProtect`, `Authorize`, `InterceptStatus` |
 | `presenter` | `JSON`, `PlainText`, `Error` (RFC 9457), `Bind`, `Render` |
 | `problem` | `Detail` (RFC 9457) + builder options + `Respond` |
 | `health` | `Probe` (liveness/readiness with `Checker` interface) + `Status` (build/uptime) |
 | `authz` | `Enforcer` interface + `Input` + `PayloadExtractor` type |
 | `authz/opa` | OPA SDK adapter (`Client`, `IsAllowed`, `Query`, `Permissions`, `AllowedResources`) |
 | `server` | Hardened `http.Server` defaults (anti-Slowloris timeouts) + signal-driven graceful shutdown (`New`, `Run`, `OnShutdown`) |
+| `logging` | Platform-standard logger: OTel/ECS field names, ISO 8601 UTC timestamps, automatic trace context injection, `Err` (error as a structured object) |
+| `trace` | W3C Trace Context: `Parse`, generation, context propagation and a `Transport` for outbound calls |
 
 ## Cross-origin security
 
@@ -125,13 +131,13 @@ Planned work, grouped by theme and roughly ordered by priority. Items tagged
 
 ### Testing & structure
 - [ ] **Security-path test coverage** — table-driven tests for `CORS` (~300 LOC,
-  currently untested), `Authorize`, `TraceID`, `Recover`, `RequestLogger`.
+  currently untested), `Authorize`, `TraceContext`, `Recover`, `RequestLogger`.
 - [ ] **Modularize `authz/opa`** — split into its own Go module so the OPA
   dependency tree (logrus, jwx, gqlparser…) stays out of the core's `go.sum`.
 
 ## Versioning
 
-`v1.0.0` is the first stable release. See [`CHANGELOG.md`](CHANGELOG.md)
+`v1.1.0` is the current stable release. See [`CHANGELOG.md`](CHANGELOG.md)
 for the full migration guide from pre-v1 import paths and identifiers.
 
 ## License

@@ -56,7 +56,7 @@ func Run(ctx context.Context, s *http.Server, opts ...RunOption) error {
 
 	errc := make(chan error, 1)
 	go func() {
-		cfg.logger.Info("server: listening", slog.String("addr", s.Addr))
+		cfg.logger.InfoContext(ctx, "server listening", slog.String("server.address", s.Addr))
 		errc <- s.ListenAndServe()
 	}()
 
@@ -71,7 +71,7 @@ func Run(ctx context.Context, s *http.Server, opts ...RunOption) error {
 		for _, fn := range cfg.onShutdown {
 			fn()
 		}
-		cfg.logger.Info("server: draining", slog.Duration("timeout", cfg.shutdownTimeout))
+		cfg.logger.InfoContext(ctx, "server draining", slog.Duration("shutdown.timeout", cfg.shutdownTimeout))
 		sctx, cancel := context.WithTimeout(context.Background(), cfg.shutdownTimeout)
 		defer cancel()
 		if err := s.Shutdown(sctx); err != nil {

@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.1.0 - 2026-08-11
+
+Adopción del Estándar de Logging para Microservicios v1.0. Esta versión contiene cambios incompatibles deliberados (librería privada, consumidores migran coordinados; se evita el module path /v2).
+
+### Incompatible
+
+- Eliminados `middleware.TraceID`, `middleware.WithHeaderName`, `middleware.WithLogger` (variante de TraceID) y `middleware.TraceIDFromContext`. Migración: `middleware.TraceID(middleware.WithHeaderName("X-Request-ID"))` → `middleware.TraceContext(middleware.WithResponseHeader("X-Request-ID"))`; `middleware.TraceIDFromContext(ctx)` → `trace.FromContext(ctx)`.
+- `github.com/google/uuid` dejó de ser dependencia directa; los IDs ahora son W3C Trace Context (trace_id 128-bit hex, span_id 64-bit hex). El módulo sigue apareciendo en `go.mod` como `// indirect` porque OPA lo requiere transitivamente.
+- `RequestLogger` emite `message:"request completed"` con campos OTel (`http.request.method`, `url.path`, `http.response.status_code`, `http.response.body.size`, `client.address`, `event.duration` en nanosegundos); desaparecen el grupo `http` anterior, el campo `logger` y la duración como string. Actualizar dashboards y alertas.
+- `Recover` emite `panic recovered` con `error.type`/`error.message`/`error.stack_trace` (antes `stacktrace`).
+- Mensajes de log renombrados en `server` (`server listening`, `server draining`), `presenter` (`json encoding failed`), `problem` (`problem encoding failed`) y `middleware.CORS` (`preflight rejected`, `cors headers skipped`). En `authz/opa.New` se eliminó el log de fallo de preparación de query (antes `opa query preparation failed`): el error ya se retorna envuelto y el caller lo loguea, así se evita el doble logging (log-and-rethrow).
+- `go.mod` requiere Go 1.26.
+
+### Added
+
+- Paquete `logging`: logger estándar de la plataforma (`New`, `WithService`, `WithEnvironment`, `WithLevel`, `Err`, constantes `Key*`) — NDJSON, campos OTel/ECS, timestamp ISO 8601 UTC ms, trace context automático.
+- Paquete `trace`: W3C Trace Context en stdlib puro (`Parse`, `New`, `NewSpanID`, `NewContext`/`FromContext`, `Traceparent`, `Transport`).
+- `middleware.TraceContext` con `WithResponseHeader` opcional.
+- `docs/logging.md`: catálogo de campos y mensajes.
+
 ## v1.0.0 — 2026-05-28
 
 First stable release. **Everything below is a breaking change vs. the

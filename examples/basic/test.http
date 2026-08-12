@@ -60,20 +60,20 @@ client.test("ready: 200", () => {
 
 
 ### ──────────────────────────────────────────────────────────────────
-### TraceID middleware
-### Sending no X-Request-ID → server generates a UUIDv7 and echoes it.
-### Sending a valid UUID → server echoes it unchanged.
-### Sending garbage → server replaces with a fresh UUIDv7.
+### TraceContext middleware (W3C traceparent)
+### TraceContext only reads the `traceparent` header (not X-Request-ID).
+### Sending no traceparent → server generates a fresh trace id and echoes it.
+### Sending a valid traceparent → server echoes its trace id (inherited).
+### Sending a malformed traceparent → server replaces it with a fresh id.
 ### ──────────────────────────────────────────────────────────────────
 
-### Auto-generated trace ID
+### Auto-generated trace ID (no traceparent sent)
 GET {{host}}/status
 
 > {%
-const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-client.test("trace: auto-generated UUID returned in header", () => {
+client.test("trace: auto-generated trace id returned in header", () => {
     const id = response.headers.valueOf("X-Request-Id");
-    client.assert(id !== null && uuidRegex.test(id),
+    client.assert(id !== null && /^[0-9a-f]{32}$/.test(id),
         "X-Request-Id = " + id);
     client.global.set("autoTraceId", id);
 });
@@ -81,37 +81,36 @@ client.test("trace: auto-generated UUID returned in header", () => {
 
 ###
 
-### Provide a valid UUID — server should echo it in the response header
+### Provide a valid traceparent — server should echo its trace id
 GET {{host}}/status
-X-Request-ID: 0190f5a4-1234-7c89-b0d1-1234567890ab
+traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
 
 > {%
-client.test("trace: echoes valid UUID unchanged", () => {
+client.test("trace: echoes inherited trace id", () => {
     const id = response.headers.valueOf("X-Request-Id");
-    client.assert(id === "0190f5a4-1234-7c89-b0d1-1234567890ab",
+    client.assert(id === "4bf92f3577b34da6a3ce929d0e0e4736",
         "echo = " + id);
 });
 %}
 
 ###
 
-### Garbage trace ID — server replaces it with a fresh UUIDv7
+### Malformed traceparent — server replaces it with a fresh trace id
 GET {{host}}/status
-X-Request-ID: not-a-uuid
+traceparent: not-a-valid-traceparent
 
 > {%
-const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-client.test("trace: garbage replaced with UUID", () => {
+client.test("trace: garbage replaced with fresh trace id", () => {
     const id = response.headers.valueOf("X-Request-Id");
-    client.assert(id !== "not-a-uuid", "garbage should be replaced");
-    client.assert(uuidRegex.test(id), "replacement = " + id);
+    client.assert(id !== "not-a-valid-traceparent", "garbage should be replaced");
+    client.assert(/^[0-9a-f]{32}$/.test(id), "replacement = " + id);
 });
 %}
 
 
 ### ──────────────────────────────────────────────────────────────────
 ### Protected API (under /api/)
-### Pipeline:  TraceID → InterceptStatus → Recover → RequestLogger →
+### Pipeline:  TraceContext → InterceptStatus → RequestLogger → Recover →
 ###           CORS(AllowAll) → CSRFProtect → Authorize(OPA)
 ### Authorize requires roles. The extractor reads X-Roles (CSV).
 ### ──────────────────────────────────────────────────────────────────
@@ -205,6 +204,25 @@ client.test("api/panic: problem+json body via InterceptStatus", () => {
         "content-type = " + response.contentType.mimeType
     );
     client.assert(response.body.status === 500, "body.status = " + response.body.status);
+});
+%}
+
+###
+
+### /api/outbound — calls the service's own /status through a traced client;
+### the nested response's trace id must match this request's inherited trace.
+GET {{host}}/api/outbound
+X-Roles: admin
+
+> {%
+client.test("api/outbound: 200", () => {
+    client.assert(response.status === 200,
+        "want 200, got " + response.status);
+});
+client.test("api/outbound: upstream.trace_id is non-empty", () => {
+    const id = response.body["upstream.trace_id"];
+    client.assert(typeof id === "string" && id.length > 0,
+        "upstream.trace_id = " + id);
 });
 %}
 

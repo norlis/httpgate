@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/norlis/httpgate/logging"
 )
 
 // Detail is the RFC 9457 representation of a single problem occurrence.
@@ -97,7 +99,7 @@ func WithInstance(r *http.Request) Option {
 type ctxRequestIDKey struct{}
 
 // ContextWithRequestID returns a copy of ctx carrying the request/correlation
-// ID. Middleware (e.g. TraceID) stores the ID here so problem responses and
+// ID. Middleware (e.g. TraceContext) stores the ID here so problem responses and
 // logs share one identifier without coupling to a specific header.
 func ContextWithRequestID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, ctxRequestIDKey{}, id)
@@ -128,6 +130,6 @@ func Respond(w http.ResponseWriter, d *Detail) {
 	w.Header().Set("Content-Type", "application/problem+json; charset=utf-8")
 	w.WriteHeader(d.Status)
 	if err := json.NewEncoder(w).Encode(d); err != nil {
-		slog.Default().Error("problem: encode detail", slog.Any("error", err))
+		slog.Default().Error("problem encoding failed", logging.Err(err))
 	}
 }
