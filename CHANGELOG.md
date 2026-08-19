@@ -1,24 +1,32 @@
 # Changelog
 
-## v1.1.0 - 2026-08-11
+## v1.2.0 - 2026-08-19
 
-Adopción del Estándar de Logging para Microservicios v1.0. Esta versión contiene cambios incompatibles deliberados (librería privada, consumidores migran coordinados; se evita el module path /v2).
-
-### Incompatible
-
-- Eliminados `middleware.TraceID`, `middleware.WithHeaderName`, `middleware.WithLogger` (variante de TraceID) y `middleware.TraceIDFromContext`. Migración: `middleware.TraceID(middleware.WithHeaderName("X-Request-ID"))` → `middleware.TraceContext(middleware.WithResponseHeader("X-Request-ID"))`; `middleware.TraceIDFromContext(ctx)` → `trace.FromContext(ctx)`.
-- `github.com/google/uuid` dejó de ser dependencia directa; los IDs ahora son W3C Trace Context (trace_id 128-bit hex, span_id 64-bit hex). El módulo sigue apareciendo en `go.mod` como `// indirect` porque OPA lo requiere transitivamente.
-- `RequestLogger` emite `message:"request completed"` con campos OTel (`http.request.method`, `url.path`, `http.response.status_code`, `http.response.body.size`, `client.address`, `event.duration` en nanosegundos); desaparecen el grupo `http` anterior, el campo `logger` y la duración como string. Actualizar dashboards y alertas.
-- `Recover` emite `panic recovered` con `error.type`/`error.message`/`error.stack_trace` (antes `stacktrace`).
-- Mensajes de log renombrados en `server` (`server listening`, `server draining`), `presenter` (`json encoding failed`), `problem` (`problem encoding failed`) y `middleware.CORS` (`preflight rejected`, `cors headers skipped`). En `authz/opa.New` se eliminó el log de fallo de preparación de query (antes `opa query preparation failed`): el error ya se retorna envuelto y el caller lo loguea, así se evita el doble logging (log-and-rethrow).
-- `go.mod` requiere Go 1.26.
+Additive release. No consumer needs code changes: the field shows up on upgrade.
 
 ### Added
 
-- Paquete `logging`: logger estándar de la plataforma (`New`, `WithService`, `WithEnvironment`, `WithLevel`, `Err`, constantes `Key*`) — NDJSON, campos OTel/ECS, timestamp ISO 8601 UTC ms, trace context automático.
-- Paquete `trace`: W3C Trace Context en stdlib puro (`Parse`, `New`, `NewSpanID`, `NewContext`/`FromContext`, `Traceparent`, `Transport`).
-- `middleware.TraceContext` con `WithResponseHeader` opcional.
-- `docs/logging.md`: catálogo de campos y mensajes.
+- `logging.KeyEventDurationHuman` (`event.duration_human`): the `logging` handler automatically adds a human-readable mirror to every record carrying `event.duration` as a top-level attr (`slog.Int64` in nanoseconds, or `slog.Duration`), formatted with `time.Duration.String()`. It is a shortcut for reading raw logs: aggregation and alerting still happen on `event.duration`. Emitted on every `middleware.RequestLogger` line with no configuration. Limitation: a duration pre-bound with `With`/`WithAttrs`, or written inside a group, is not mirrored — the same limitation `trace_id`/`span_id` already have. If your service already emits this field through a local handler decorator, remove that code in the same upgrade to avoid a duplicate JSON key.
+
+## v1.1.0 - 2026-08-11
+
+Adoption of the Microservices Logging Standard v1.0. This release contains deliberate breaking changes (private library, consumers migrate in a coordinated way; the `/v2` module path is avoided).
+
+### Incompatible
+
+- Removed `middleware.TraceID`, `middleware.WithHeaderName`, `middleware.WithLogger` (the TraceID variant) and `middleware.TraceIDFromContext`. Migration: `middleware.TraceID(middleware.WithHeaderName("X-Request-ID"))` → `middleware.TraceContext(middleware.WithResponseHeader("X-Request-ID"))`; `middleware.TraceIDFromContext(ctx)` → `trace.FromContext(ctx)`.
+- `github.com/google/uuid` is no longer a direct dependency; IDs are now W3C Trace Context (trace_id 128-bit hex, span_id 64-bit hex). The module still appears in `go.mod` as `// indirect` because OPA requires it transitively.
+- `RequestLogger` emits `message:"request completed"` with OTel fields (`http.request.method`, `url.path`, `http.response.status_code`, `http.response.body.size`, `client.address`, `event.duration` in nanoseconds); the former `http` group, the `logger` field and the string-formatted duration are gone. Update dashboards and alerts.
+- `Recover` emits `panic recovered` with `error.type`/`error.message`/`error.stack_trace` (previously `stacktrace`).
+- Log messages renamed in `server` (`server listening`, `server draining`), `presenter` (`json encoding failed`), `problem` (`problem encoding failed`) and `middleware.CORS` (`preflight rejected`, `cors headers skipped`). In `authz/opa.New` the query-preparation failure log (previously `opa query preparation failed`) was removed: the error is already returned wrapped and the caller logs it, which avoids double logging (log-and-rethrow).
+- `go.mod` requires Go 1.26.
+
+### Added
+
+- `logging` package: the platform-standard logger (`New`, `WithService`, `WithEnvironment`, `WithLevel`, `Err`, `Key*` constants) — NDJSON, OTel/ECS fields, ISO 8601 UTC timestamps with milliseconds, automatic trace context.
+- `trace` package: W3C Trace Context in pure stdlib (`Parse`, `New`, `NewSpanID`, `NewContext`/`FromContext`, `Traceparent`, `Transport`).
+- `middleware.TraceContext` with an optional `WithResponseHeader`.
+- `docs/logging.md`: catalog of fields and messages.
 
 ## v1.0.0 — 2026-05-28
 

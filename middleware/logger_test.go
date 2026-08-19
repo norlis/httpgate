@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/norlis/httpgate/logging"
 )
@@ -74,8 +75,12 @@ func TestRequestLogger_LogsUnlistedPath(t *testing.T) {
 	if m[logging.KeyHTTPResponseStatusCode] != float64(http.StatusOK) {
 		t.Fatalf("missing %s: %v", logging.KeyHTTPResponseStatusCode, m)
 	}
-	if d, ok := m[logging.KeyEventDuration].(float64); !ok || d <= 0 {
+	d, ok := m[logging.KeyEventDuration].(float64)
+	if !ok || d <= 0 {
 		t.Fatalf("%s must be a positive number of nanoseconds: %v", logging.KeyEventDuration, m)
+	}
+	if want := time.Duration(int64(d)).String(); m[logging.KeyEventDurationHuman] != want {
+		t.Fatalf("%s = %v, want %q (mirror of %s): %v", logging.KeyEventDurationHuman, m[logging.KeyEventDurationHuman], want, logging.KeyEventDuration, m)
 	}
 	if _, ok := m["logger"]; ok {
 		t.Fatalf("ad-hoc logger field must be gone: %v", m)
