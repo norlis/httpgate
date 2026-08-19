@@ -28,7 +28,8 @@ const (
 	KeyHTTPResponseStatusCode = "http.response.status_code"
 	KeyHTTPResponseBodySize   = "http.response.body.size"
 	KeyClientAddress          = "client.address"
-	KeyEventDuration          = "event.duration" // nanoseconds
+	KeyEventDuration          = "event.duration"       // nanoseconds
+	KeyEventDurationHuman     = "event.duration_human" // human mirror of KeyEventDuration; never aggregate over it
 )
 
 // timeLayout renders ISO 8601 UTC with millisecond precision, per §2.4.
