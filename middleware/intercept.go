@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"net/http"
 
 	"github.com/norlis/httpgate/problem"

@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.3.0 - 2026-10-01
+
+### Incompatible
+
+- `go.mod` requires Go 1.27.
+- `presenter.JSON`, `presenter.Bind`, `problem.Respond` and `middleware.InterceptStatus` now use `encoding/json/v2`. Wire changes on output: no trailing newline after the body; nil slices encode as `[]` and nil maps as `{}` (previously `null`); `<`, `>`, `&` are no longer escaped; `omitempty` no longer omits `0`, `false` or a nil `[]byte` (use `omitzero` for Go-zero semantics); `[N]byte` arrays encode as base64 strings; a `time.Duration` field without a format tag is an encode error. `presenter.JSON` now marshals in memory first with `json.Deterministic(true)` (map keys sorted): an encode failure yields a 500 with an empty body instead of a 200 with an empty or truncated one. Consumers wanting `null` for nil collections pass `json.FormatNilSliceAsNull(true)` / `json.FormatNilMapAsNull(true)` in their own code.
+- `presenter.Bind` is stricter: JSON object names are matched case-sensitively, duplicate names and invalid UTF-8 are rejected, trailing data after the value is rejected, and an empty body is an error that no longer wraps `io.EOF` (map all of these to your 400 path by checking `err != nil`, not `errors.Is(err, io.EOF)`).
+
+### Added
+
+- `authz/opa.WithData(map[string]any)`: seed the OPA data document from memory instead of `DataFiles` (mutually exclusive). In this mode only `.rego` files under `PoliciesPath` are loaded (parsed once at `New`); data files there are ignored. A nil map is an error at `New`, never a silent fallback to files.
+- `authz/opa.Client.Reload(ctx, data)`: atomically replace the data document and re-prepare every compiled query; evaluations in flight keep the previous snapshot, and a failed reload (unencodable data, compile error) returns an error and keeps the previous state — it never panics.
+- A `Query` prepare failure is no longer permanent for the client's lifetime: it is returned and retried on the next call.
+
 ## v1.2.0 - 2026-08-19
 
 Additive release. No consumer needs code changes: the field shows up on upgrade.

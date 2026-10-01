@@ -6,7 +6,7 @@ package problem
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"log/slog"
 	"net/http"
 	"time"
@@ -125,11 +125,18 @@ func WithRequestIDFromContext(ctx context.Context) Option {
 	}
 }
 
-// Respond serializes d as application/problem+json and writes it.
+// Respond serializes d as application/problem+json and writes it. Marshals
+// before committing the header so a failure never leaves a truncated body.
 func Respond(w http.ResponseWriter, d *Detail) {
+	body, err := json.Marshal(d)
+	if err != nil {
+		slog.Default().Error("problem encoding failed", logging.Err(err))
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/problem+json; charset=utf-8")
 	w.WriteHeader(d.Status)
-	if err := json.NewEncoder(w).Encode(d); err != nil {
-		slog.Default().Error("problem encoding failed", logging.Err(err))
+	if _, err := w.Write(body); err != nil {
+		slog.Default().Error("problem write failed", logging.Err(err))
 	}
 }

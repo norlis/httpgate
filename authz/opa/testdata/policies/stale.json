@@ -1,0 +1,1 @@
+{"roles": {"admin": ["stale-perm"]}, "permissions": {"stale-perm": ["GET:/stale$"]}, "whitelist": ["GET:/stale-public$"]}
