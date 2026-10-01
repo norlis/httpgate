@@ -66,6 +66,20 @@ extractor.
 | `logging` | Platform-standard logger: OTel/ECS field names, ISO 8601 UTC timestamps, automatic trace context injection, `Err` (error as a structured object) |
 | `trace` | W3C Trace Context: `Parse`, generation, context propagation and a `Transport` for outbound calls |
 
+## Reloadable OPA data
+
+`authz/opa` can take its data document (`data.*`) from memory and replace it at runtime, e.g. from a config store, without restarting:
+
+```go
+c, err := opa.New(ctx, opa.Config{Query: "data.authz.allow", PoliciesPath: "policies/authz"}, opa.WithData(doc))
+// later, on a config refresh:
+if err := c.Reload(ctx, newDoc); err != nil {
+	log.Error("reload failed", logging.Err(err)) // previous document keeps serving
+}
+```
+
+In this mode only `.rego` files under `PoliciesPath` are loaded (parsed once at `New`, `_test.rego` included, as in file mode); `DataFiles` and `WithData` are mutually exclusive, and a nil document is an error at `New` — it never falls back to data files on disk.
+
 ## Cross-origin security
 
 `middleware.CORS` and `middleware.CSRFProtect` solve different problems

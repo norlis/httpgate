@@ -1,7 +1,7 @@
 package presenter
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,7 +20,7 @@ type Renderer interface {
 // Bind decodes the request body into v as JSON and then calls v.Bind(r).
 func Bind(r *http.Request, v Binder) error {
 	body := r.Body
-	if err := json.NewDecoder(body).Decode(v); err != nil {
+	if err := json.UnmarshalRead(body, v); err != nil {
 		return fmt.Errorf("presenter: decode body: %w", err)
 	}
 	defer io.Copy(io.Discard, body) //nolint:errcheck
