@@ -16,7 +16,8 @@ import (
 	_ "honnef.co/go/tools/cmd/staticcheck"
 
 	// Herramientas de desarrollo y testing
+	// gopls se instala aparte (ver Makefile, GOPLS_VERSION): su grafo de
+	// dependencias nunca coincide con el de golangci-lint en el mismo módulo.
 	_ "github.com/go-delve/delve/cmd/dlv"
-	_ "golang.org/x/tools/gopls"
 	_ "gotest.tools/gotestsum"
 )

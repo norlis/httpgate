@@ -20,7 +20,7 @@ roles := input.payload.roles if {
 # whitelist
 allow if {
 	some action in data.whitelist
-	regex.match(action, input.action)
+	action_matches(action)
 }
 
 allow if {
@@ -31,7 +31,14 @@ action_allowed if {
 	some role in roles
 	some permission in data.roles[role]
 	some path in data.permissions[permission]
-	regex.match(path, input.action)
+	action_matches(path)
+}
+
+# Anchored at the start so a pattern cannot match an allowed action smuggled
+# into the path or query of another request ("GET:/x?y=GET:/health").
+# input.action is "METHOD:/path?query"; patterns decide their own end anchor.
+action_matches(pattern) if {
+	regex.match(concat("", ["^(?:", pattern, ")"]), input.action)
 }
 
 # permission names granted to the request's roles

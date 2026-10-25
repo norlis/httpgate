@@ -1,6 +1,3 @@
-// Package middleware provides a net/http handler to handle CORS related requests.
-// This implementation is guided by Clean Architecture principles, separating the
-// core CORS logic from the HTTP transport layer.
 package middleware
 
 import (
@@ -49,34 +46,36 @@ type CORSOptions struct {
 	Logger             *slog.Logger
 }
 
-type corsEngine struct {
-	allowedOrigins    []string
-	allowedWOrigins   []wildcard
-	allowOriginFunc   func(r *http.Request, origin string) bool
-	allowedMethods    map[string]struct{}
-	allowedHeaders    map[string]struct{}
-	exposedHeaders    string
-	allowCredentials  bool
-	maxAge            string
-	allowedOriginsAll bool
-	allowedHeadersAll bool
-	logger            *slog.Logger
+// cors is the normalized, request-ready form of CORSOptions plus the handler
+// logic that applies it.
+type cors struct {
+	allowedOrigins     []string
+	allowedWOrigins    []wildcard
+	allowOriginFunc    func(r *http.Request, origin string) bool
+	allowedMethods     map[string]struct{}
+	allowedHeaders     map[string]struct{}
+	exposedHeaders     string
+	allowCredentials   bool
+	maxAge             string
+	allowedOriginsAll  bool
+	allowedHeadersAll  bool
+	optionsPassthrough bool
+	logger             *slog.Logger
 }
 
 // CORS returns a Middleware configured with opts.
+//
+// CORS panics at construction when AllowCredentials is combined with a
+// wildcard origin ("*", or an empty AllowedOrigins list, which means "all"):
+// browsers reject `Access-Control-Allow-Origin: *` on credentialed requests, so
+// that configuration can never work and must fail at startup, not silently in
+// the client. Use explicit origins or AllowOriginFunc with credentials.
 func CORS(opts CORSOptions) Middleware {
-	engine := newCorsEngine(opts)
-	c := &corsAdapter{
-		engine:             engine,
-		optionsPassthrough: opts.OptionsPassthrough,
-		logger:             engine.logger, // Share the same logger
-	}
-	return c.middleware
+	return newCORS(opts).middleware
 }
 
-// newCorsEngine processes the CORSOptions and returns a configured corsEngine.
-// Its Cognitive Complexity is low as it delegates processing to helper functions.
-func newCorsEngine(opts CORSOptions) *corsEngine {
+// newCORS processes the CORSOptions into a cors.
+func newCORS(opts CORSOptions) *cors {
 	logger := opts.Logger
 	if logger == nil {
 		// Default to a disabled logger to avoid nil checks everywhere.
@@ -84,31 +83,34 @@ func newCorsEngine(opts CORSOptions) *corsEngine {
 	}
 
 	allowedOriginsAll, allowedOrigins, allowedWOrigins := processOrigins(opts)
+	if allowedOriginsAll && opts.AllowCredentials {
+		panic("middleware.CORS: AllowCredentials cannot be combined with a wildcard origin; list the origins or use AllowOriginFunc")
+	}
 	allowedMethods := processAllowedMethods(opts.AllowedMethods)
 	allowedHeadersAll, allowedHeaders := processAllowedHeaders(opts.AllowedHeaders)
 
-	engine := &corsEngine{
-		logger:            logger,
-		allowOriginFunc:   opts.AllowOriginFunc,
-		allowCredentials:  opts.AllowCredentials,
-		allowedOriginsAll: allowedOriginsAll,
-		allowedOrigins:    allowedOrigins,
-		allowedWOrigins:   allowedWOrigins,
-		allowedMethods:    allowedMethods,
-		allowedHeadersAll: allowedHeadersAll,
-		allowedHeaders:    allowedHeaders,
+	c := &cors{
+		logger:             logger,
+		allowOriginFunc:    opts.AllowOriginFunc,
+		allowCredentials:   opts.AllowCredentials,
+		allowedOriginsAll:  allowedOriginsAll,
+		allowedOrigins:     allowedOrigins,
+		allowedWOrigins:    allowedWOrigins,
+		allowedMethods:     allowedMethods,
+		allowedHeadersAll:  allowedHeadersAll,
+		allowedHeaders:     allowedHeaders,
+		optionsPassthrough: opts.OptionsPassthrough,
 	}
 
-	// These are simple enough to not require a helper function
 	if len(opts.ExposedHeaders) > 0 {
-		engine.exposedHeaders = buildExposedHeaders(opts.ExposedHeaders)
+		c.exposedHeaders = buildExposedHeaders(opts.ExposedHeaders)
 	}
 
 	if opts.MaxAge > 0 {
-		engine.maxAge = strconv.Itoa(opts.MaxAge)
+		c.maxAge = strconv.Itoa(opts.MaxAge)
 	}
 
-	return engine
+	return c
 }
 
 // processOrigins handles the logic for parsing and normalizing allowed origins.
@@ -181,16 +183,8 @@ func buildExposedHeaders(headers []string) string {
 	return strings.Join(canonicalHeaders, ", ")
 }
 
-// corsAdapter is the HTTP middleware. It acts as an adapter between the HTTP
-// layer (`net/http`) and the framework-agnostic `corsEngine`.
-type corsAdapter struct {
-	engine             *corsEngine
-	optionsPassthrough bool
-	logger             *slog.Logger
-}
-
 // middleware wraps a `http.Handler` with the CORS logic.
-func (c *corsAdapter) middleware(next http.Handler) http.Handler {
+func (c *cors) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Check for preflight request
 		if r.Method == http.MethodOptions && r.Header.Get(headerAccessControlRequestMethod) != "" {
@@ -210,7 +204,7 @@ func (c *corsAdapter) middleware(next http.Handler) http.Handler {
 }
 
 // handlePreflight handles pre-flight CORS requests.
-func (c *corsAdapter) handlePreflight(w http.ResponseWriter, r *http.Request) {
+func (c *cors) handlePreflight(w http.ResponseWriter, r *http.Request) {
 	headers := w.Header()
 	origin := r.Header.Get(headerOrigin)
 
@@ -224,24 +218,24 @@ func (c *corsAdapter) handlePreflight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !c.engine.isOriginAllowed(r, origin) {
+	if !c.isOriginAllowed(r, origin) {
 		c.logger.DebugContext(r.Context(), "preflight rejected", slog.String("cors.reason", "origin not allowed"), slog.String("cors.origin", origin))
 		return
 	}
 
 	reqMethod := r.Header.Get(headerAccessControlRequestMethod)
-	if !c.engine.isMethodAllowed(reqMethod) {
+	if !c.isMethodAllowed(reqMethod) {
 		c.logger.DebugContext(r.Context(), "preflight rejected", slog.String("cors.reason", "method not allowed"), slog.String("cors.method", reqMethod))
 		return
 	}
 
 	reqHeaders := parseHeaderList(r.Header.Get(headerAccessControlRequestHeaders))
-	if !c.engine.areHeadersAllowed(reqHeaders) {
+	if !c.areHeadersAllowed(reqHeaders) {
 		c.logger.DebugContext(r.Context(), "preflight rejected", slog.String("cors.reason", "headers not allowed"), slog.Any("cors.headers", reqHeaders))
 		return
 	}
 
-	if c.engine.allowedOriginsAll {
+	if c.allowedOriginsAll {
 		headers.Set(headerAccessControlAllowOrigin, "*")
 	} else {
 		headers.Set(headerAccessControlAllowOrigin, origin)
@@ -253,17 +247,17 @@ func (c *corsAdapter) handlePreflight(w http.ResponseWriter, r *http.Request) {
 		headers.Set(headerAccessControlAllowHeaders, strings.Join(reqHeaders, ", "))
 	}
 
-	if c.engine.allowCredentials {
+	if c.allowCredentials {
 		headers.Set(headerAccessControlAllowCredentials, "true")
 	}
 
-	if c.engine.maxAge != "" {
-		headers.Set(headerAccessControlMaxAge, c.engine.maxAge)
+	if c.maxAge != "" {
+		headers.Set(headerAccessControlMaxAge, c.maxAge)
 	}
 }
 
 // handleActualRequest handles simple cross-origin requests.
-func (c *corsAdapter) handleActualRequest(w http.ResponseWriter, r *http.Request) {
+func (c *cors) handleActualRequest(w http.ResponseWriter, r *http.Request) {
 	origin := r.Header.Get(headerOrigin)
 	headers := w.Header()
 
@@ -274,44 +268,44 @@ func (c *corsAdapter) handleActualRequest(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if !c.engine.isOriginAllowed(r, origin) {
+	if !c.isOriginAllowed(r, origin) {
 		c.logger.DebugContext(r.Context(), "cors headers skipped", slog.String("cors.reason", "origin not allowed"), slog.String("cors.origin", origin))
 		return
 	}
 
-	if !c.engine.isMethodAllowed(r.Method) {
+	if !c.isMethodAllowed(r.Method) {
 		c.logger.DebugContext(r.Context(), "cors headers skipped", slog.String("cors.reason", "method not allowed"), slog.String("cors.method", r.Method))
 		return
 	}
 
-	if c.engine.allowedOriginsAll {
+	if c.allowedOriginsAll {
 		headers.Set(headerAccessControlAllowOrigin, "*")
 	} else {
 		headers.Set(headerAccessControlAllowOrigin, origin)
 	}
 
-	if c.engine.exposedHeaders != "" {
-		headers.Set(headerAccessControlExposeHeaders, c.engine.exposedHeaders)
+	if c.exposedHeaders != "" {
+		headers.Set(headerAccessControlExposeHeaders, c.exposedHeaders)
 	}
 
-	if c.engine.allowCredentials {
+	if c.allowCredentials {
 		headers.Set(headerAccessControlAllowCredentials, "true")
 	}
 }
 
 // isOriginAllowed checks if a given origin is allowed.
-func (e *corsEngine) isOriginAllowed(r *http.Request, origin string) bool {
-	if e.allowOriginFunc != nil {
-		return e.allowOriginFunc(r, origin)
+func (c *cors) isOriginAllowed(r *http.Request, origin string) bool {
+	if c.allowOriginFunc != nil {
+		return c.allowOriginFunc(r, origin)
 	}
-	if e.allowedOriginsAll {
+	if c.allowedOriginsAll {
 		return true
 	}
 	origin = strings.ToLower(origin)
-	if slices.Contains(e.allowedOrigins, origin) {
+	if slices.Contains(c.allowedOrigins, origin) {
 		return true
 	}
-	for _, w := range e.allowedWOrigins {
+	for _, w := range c.allowedWOrigins {
 		if w.match(origin) {
 			return true
 		}
@@ -320,21 +314,21 @@ func (e *corsEngine) isOriginAllowed(r *http.Request, origin string) bool {
 }
 
 // isMethodAllowed checks if a given method is allowed.
-func (e *corsEngine) isMethodAllowed(method string) bool {
+func (c *cors) isMethodAllowed(method string) bool {
 	if method == http.MethodOptions {
 		return true // Always allow preflight requests
 	}
-	_, ok := e.allowedMethods[strings.ToUpper(method)]
+	_, ok := c.allowedMethods[strings.ToUpper(method)]
 	return ok
 }
 
 // areHeadersAllowed checks if a given list of headers are allowed.
-func (e *corsEngine) areHeadersAllowed(requestedHeaders []string) bool {
-	if e.allowedHeadersAll || len(requestedHeaders) == 0 {
+func (c *cors) areHeadersAllowed(requestedHeaders []string) bool {
+	if c.allowedHeadersAll || len(requestedHeaders) == 0 {
 		return true
 	}
 	for _, header := range requestedHeaders {
-		if _, ok := e.allowedHeaders[http.CanonicalHeaderKey(header)]; !ok {
+		if _, ok := c.allowedHeaders[http.CanonicalHeaderKey(header)]; !ok {
 			return false
 		}
 	}
@@ -357,15 +351,16 @@ func parseHeaderList(headerList string) []string {
 	return list
 }
 
-// AllowAll returns a permissive CORS middleware. The defaults can be
-// tweaked via the option callbacks.
+// AllowAll returns a permissive CORS middleware: every origin, the common
+// methods, every header, 12h preflight cache. Credentials are NOT enabled,
+// because "*" with credentials is rejected by browsers (see CORS). The
+// defaults can be tweaked via the option callbacks.
 func AllowAll(opts ...func(*CORSOptions)) Middleware {
 	base := CORSOptions{
-		AllowedOrigins:   []string{"*"},
-		AllowedMethods:   []string{http.MethodHead, http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete},
-		AllowedHeaders:   []string{"*"},
-		AllowCredentials: true,
-		MaxAge:           int((12 * time.Hour).Seconds()),
+		AllowedOrigins: []string{"*"},
+		AllowedMethods: []string{http.MethodHead, http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete},
+		AllowedHeaders: []string{"*"},
+		MaxAge:         int((12 * time.Hour).Seconds()),
 	}
 	for _, opt := range opts {
 		opt(&base)

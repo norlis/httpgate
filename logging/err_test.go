@@ -25,8 +25,14 @@ func TestErr_StructuredObject(t *testing.T) {
 		t.Fatalf("error.message = %v", m[KeyErrorMessage])
 	}
 	stack, _ := m[KeyErrorStackTrace].(string)
-	if !strings.Contains(stack, "goroutine") || !strings.Contains(stack, "\n") {
-		t.Fatalf("error.stack_trace must be a single string with embedded newlines, got %q", stack)
+	if !strings.Contains(stack, "TestErr_StructuredObject") || !strings.Contains(stack, "\n\t") {
+		t.Fatalf("error.stack_trace must list the caller frames as one string, got %q", stack)
+	}
+	if strings.Contains(stack, "goroutine ") {
+		t.Fatalf("error.stack_trace must not carry debug.Stack's goroutine header, got %q", stack)
+	}
+	if frames := strings.Count(stack, "\n\t"); frames > maxStackFrames {
+		t.Fatalf("stack has %d frames, want <= %d", frames, maxStackFrames)
 	}
 }
 
@@ -67,5 +73,13 @@ func TestErr_StdlibErrorType(t *testing.T) {
 	m := lastLine(t, buf)
 	if m[KeyErrorType] != "*errors.errorString" {
 		t.Fatalf("error.type = %v", m[KeyErrorType])
+	}
+}
+
+func BenchmarkErr(b *testing.B) {
+	err := errors.New("boom")
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = Err(err)
 	}
 }

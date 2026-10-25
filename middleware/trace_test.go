@@ -24,7 +24,7 @@ func captureTrace(t *testing.T, mw func(http.Handler) http.Handler, req *http.Re
 	rec := httptest.NewRecorder()
 	mw(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		tc, _ = trace.FromContext(r.Context())
-		requestID = problem.RequestIDFromContext(r.Context())
+		requestID = problem.New("x", http.StatusInternalServerError, problem.WithInstance(r)).RequestID
 	})).ServeHTTP(rec, req)
 	return tc, requestID, rec
 }

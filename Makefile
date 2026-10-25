@@ -4,9 +4,10 @@ ALL_PKGS := $(sort $(shell go list ./...))
 
 TOOLS_BIN_DIR := $(abspath ./bin)
 TOOLS_MOD_DIR := $(abspath ./tools)
+GOPLS_VERSION := v0.24.0
 export PATH := $(TOOLS_BIN_DIR):$(PATH)
 
-.PHONY: help all test lint vulncheck format check-format tools tools-force mod-tidy modernize
+.PHONY: help all test bench lint vulncheck format check-format tools tools-force mod-tidy modernize
 
 help:
 	@echo "Targets:"
@@ -17,6 +18,7 @@ help:
 	@echo "  format         gofumpt -l -w ."
 	@echo "  check-format   gofumpt -l . (CI mode)"
 	@echo "  test           go test ./... --cover"
+	@echo "  bench          go test -bench=. -benchmem -count=6 ./... (compare with benchstat)"
 	@echo "  modernize      go fix -diff ./..."
 	@echo "  mod-tidy       go mod tidy"
 
@@ -32,6 +34,7 @@ $(TOOLS_BIN_DIR): $(TOOLS_MOD_DIR)/tools.go $(TOOLS_MOD_DIR)/go.mod
 	@cd $(TOOLS_MOD_DIR) && \
 		go list -e -f '{{range .Imports}}{{.}} {{end}}' -tags=tools tools.go | \
 		xargs -n1 env GOBIN=$(TOOLS_BIN_DIR) go install -v
+	@GOBIN=$(TOOLS_BIN_DIR) go install golang.org/x/tools/gopls@$(GOPLS_VERSION)
 	@touch $(TOOLS_BIN_DIR)
 	@echo "==> Tools installed."
 
@@ -59,6 +62,9 @@ check-format: tools
 # --- Tests ---
 test:
 	@go test ./... --cover
+
+bench:
+	@go test -run='^$$' -bench=. -benchmem -count=6 ./...
 
 # --- Modernization & modules ---
 modernize:

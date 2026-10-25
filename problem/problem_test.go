@@ -1,7 +1,6 @@
 package problem
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -9,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/norlis/httpgate/trace"
 )
 
 func TestNew_marshalsRFC9457Shape(t *testing.T) {
@@ -57,10 +58,10 @@ func TestRespond_setsContentTypeAndStatus(t *testing.T) {
 	}
 }
 
-func TestWithInstance_setsPathAndRequestIDFromContext(t *testing.T) {
+func TestWithInstance_setsPathAndRequestIDFromTrace(t *testing.T) {
 	t.Parallel()
 	req := httptest.NewRequest("GET", "/api/users/42", http.NoBody)
-	req = req.WithContext(ContextWithRequestID(req.Context(), "abc-123"))
+	req = req.WithContext(trace.NewContext(req.Context(), trace.Context{TraceID: "abc-123", SpanID: "0123456789abcdef"}))
 	d := New("nope", http.StatusBadRequest, WithInstance(req))
 	if d.Instance != "/api/users/42" {
 		t.Fatalf("instance = %q", d.Instance)
@@ -76,17 +77,6 @@ func TestWithInstance_noRequestIDWhenContextEmpty(t *testing.T) {
 	d := New("nope", http.StatusBadRequest, WithInstance(req))
 	if d.RequestID != "" {
 		t.Fatalf("requestID = %q, want empty", d.RequestID)
-	}
-}
-
-func TestRequestIDFromContext_roundTrips(t *testing.T) {
-	t.Parallel()
-	ctx := ContextWithRequestID(context.Background(), "xyz-789")
-	if got := RequestIDFromContext(ctx); got != "xyz-789" {
-		t.Fatalf("got %q, want xyz-789", got)
-	}
-	if got := RequestIDFromContext(context.Background()); got != "" {
-		t.Fatalf("empty context: got %q, want \"\"", got)
 	}
 }
 

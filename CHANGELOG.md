@@ -1,5 +1,40 @@
 # Changelog
 
+## v1.4.0 - 2026-10-19
+
+### Incompatible
+
+- `policies/authz/authz.rego` (and the `authz/opa` test fixture) anchors every `data.whitelist` and `data.permissions` pattern at the start of the action: `regex.match("^(?:" + pattern + ")", input.action)`. Before, `GET:/admin/secret?x=GET:/health` matched the whitelisted `GET:/health$` because `middleware.Authorize` evaluates `METHOD:/path?query` and the match was unanchored, so any allowed action smuggled into the query or the path granted access. Patterns that relied on matching a substring must be rewritten with their intended prefix; patterns already starting with `^` are unaffected. The example `permissions.json` now ends `GET:/status` and `GET:/api/panic` with `$`.
+- `health.Probe` no longer puts each failing checker's `err.Error()` in the response body (it exposed internal hosts to whoever can reach the probe). Opt back in with `health.WithErrorDetails()`; log failures with the new `health.WithLogger(l)` (`health check failed`, `health.check`, standard error object).
+- `middleware.Option` is renamed `middleware.InterceptOption` and `middleware.InterceptorOptions` (exported struct with only unexported fields) is unexported; `WithIntercept`/`WithMessage` return the new type. Every middleware constructor now returns `middleware.Middleware` instead of the spelled-out `func(http.Handler) http.Handler` (same underlying type; assignments compile unchanged).
+- `presenter.Renderer` and `presenter.Render` are removed: no implementation or caller existed. Use `presenter.JSON` directly.
+- `problem.ContextWithRequestID`, `problem.RequestIDFromContext` and `problem.WithRequestIDFromContext` are removed. The request id in problem+json was always the W3C trace id stored twice in the context by `middleware.TraceContext`; `problem.WithInstance` now reads it from `trace.FromContext` directly (one context value per request instead of two). `problem.WithRequestID(id)` stays for ids that are not the trace id. Migration: replace `problem.ContextWithRequestID(ctx, id)` with `trace.NewContext(ctx, trace.Context{TraceID: id, SpanID: ...})`, or pass `problem.WithRequestID(id)` explicitly.
+- `middleware.CORS` panics at construction when `AllowCredentials` is combined with a wildcard origin (`"*"` or an empty `AllowedOrigins`, which means "all"): browsers reject `Access-Control-Allow-Origin: *` on credentialed requests, so the configuration could never work. List the origins or use `AllowOriginFunc`. `middleware.AllowAll` therefore no longer sets `AllowCredentials: true` (same default as rs/cors); opt in with `AllowAll(func(o *CORSOptions) { o.AllowedOrigins = []string{...}; o.AllowCredentials = true })`.
+- `presenter.Bind` is now `Bind(w http.ResponseWriter, r *http.Request, v Binder, opts ...BindOption) error`. The body is wrapped in `http.MaxBytesReader` (1 MiB by default, `presenter.WithMaxBodyBytes` per call) and every failure is a `*presenter.BindError` whose `Status` is `413` on overflow and `400` otherwise; the dead `io.Copy(io.Discard)` drain was removed. Migration: add the `w` argument and map `BindError.Status` to your error response.
+- `server.New` defaults changed: `ReadTimeout` 15s → 30s, `WriteTimeout` 15s → 60s (safety nets; use `middleware.Timeout` per route), `MaxHeaderBytes` 1 MiB → 64 KiB, plus `MaxHeaderValueCount` 256 and an `HTTP2Config` (`MaxConcurrentStreams` 250, `SendPingTimeout` 30s, `PingTimeout` 15s, `WriteByteTimeout` 15s). Override with `server.With`.
+- `logging.Err` captures at most 32 frames with `runtime.Callers`; `error.stack_trace` no longer starts with `goroutine N [running]:`. Alerts matching on that header must be updated.
+
+### Added
+
+- `make bench` and `BenchmarkRecommendedChain` / `BenchmarkMiddlewareEach` in `middleware`: a full request through the documented chain and each middleware in isolation, for `benchstat` comparisons.
+- `middleware.Timeout(d)`: per-request deadline in the context; responds 504 problem+json when the handler returns on deadline without having committed a response. No buffering, streaming-safe; handlers that ignore `ctx` are not interrupted.
+- `middleware.Shed(maxInFlight)`: bulkhead that rejects requests beyond the limit with 503 problem+json and `Retry-After: 1`.
+- `server.WithDrainDelay(d)`: keeps serving for `d` after `OnShutdown` hooks and before `Shutdown`, closing the Kubernetes Endpoints propagation window. Default 0.
+- `server.Run` sets `http.Server.ErrorLog` to the structured logger when unset, so `net/http` internal errors are NDJSON.
+- `health.WithCheckTimeout(d)`: per-checker deadline in `Probe`.
+- `middleware.WrapWriter` implements `http.Flusher` and `io.ReaderFrom` directly (sendfile and `w.(http.Flusher)` keep working through the wrapper); `InterceptStatus` materializes a pending intercepted status on `Flush` and drops stale `Content-Length`/`Content-Encoding`/`ETag` before writing the problem document.
+
+### Fixed
+
+- `health.Probe` no longer hangs the request when a `Checker` ignores its context: the wait is bounded by the request context and `WithCheckTimeout`, and a checker still running past the deadline is reported as `"TIMEOUT"` (new `CheckResult.Status` value) while the others keep their result.
+- `middleware.Recover` no longer writes a 500 problem document on top of a response that was already committed through the package's writer wrapper (`RequestLogger`, `Timeout` or `InterceptStatus` earlier in the chain); the panic is still logged.
+- `authz/opa.Client.IsAllowed` returns `false, nil` on a result without expressions instead of panicking, matching `Query`.
+- `middleware.RequestLogger` emits the access line with `slog.Logger.LogAttrs`: 6 fewer allocations per request (7 → 1 with a disabled logger), identical output.
+- `middleware.Authorize` no longer sends the enforcer's error message to the client in the 500 body (it exposed OPA internals) and now logs it through the new `middleware.WithAuthorizeLogger(l)` option, following the same 4xx/5xx policy as `presenter.Error`. The signature gains a variadic `...AuthorizeOption` and returns `Middleware`; existing calls compile unchanged.
+- `middleware.InterceptStatus` shares the package's single `ResponseWriter` wrapper instead of its own: `io.Copy(w, file)` behind it reaches the underlying `ReadFrom` again (sendfile), the access line's `http.response.body.size` reports the problem document actually sent, and a second `WriteHeader` after an intercepted status no longer commits a different status ahead of the document. `middleware.WrapWriter` is idempotent: wrapping an already wrapped writer returns the existing wrapper, so stacked middlewares share one status/bytes/committed state (two fewer allocations per request in the recommended chain).
+- `authz/opa.New`/`Reload` now reject documents that are not valid JSON (e.g. `NaN`): the in-memory store's own round trip accepted them and stored `NaN` as a `json.Number`. The document is validated once with `util.RoundTrip` and written pre-normalized.
+- `go.mod` pins `toolchain go1.27.2` (fixes the HTTP/2 HPACK race crash shipped in Go 1.27.0/1.27.1).
+
 ## v1.3.0 - 2026-10-01
 
 ### Incompatible

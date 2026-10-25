@@ -1,57 +1,76 @@
 package middleware
 
 import (
-	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/norlis/httpgate/authz"
-	"github.com/norlis/httpgate/problem"
+	"github.com/norlis/httpgate/presenter"
 )
 
+type authorizeConfig struct {
+	logger *slog.Logger
+}
+
+// AuthorizeOption configures Authorize.
+type AuthorizeOption func(*authorizeConfig)
+
+// WithAuthorizeLogger sets the logger that records enforcer failures (the
+// 500 path). Without it those failures are answered but not logged. A nil
+// logger is ignored.
+func WithAuthorizeLogger(l *slog.Logger) AuthorizeOption {
+	return func(c *authorizeConfig) {
+		if l != nil {
+			c.logger = l
+		}
+	}
+}
+
 // Authorize builds middleware that extracts a payload from each request and
-// asks the authz.Enforcer whether the action is allowed. On extraction error
-// it responds 400, on enforcer error 500, and on denial 403 — all as RFC 9457.
-func Authorize(policyEnforcer authz.Enforcer, extractor authz.PayloadExtractor) func(http.Handler) http.Handler {
+// asks the authz.Enforcer whether the action is allowed. All failures are RFC
+// 9457: an extraction error is a client error (400, the message is surfaced);
+// a denial is 403; an enforcer error is a server fault (500): the raw error is
+// logged through WithAuthorizeLogger and never sent to the client, exactly
+// like presenter.Error.
+//
+// The action evaluated is "METHOD:/path?query" (r.URL.RequestURI()).
+func Authorize(policyEnforcer authz.Enforcer, extractor authz.PayloadExtractor, opts ...AuthorizeOption) Middleware {
+	cfg := &authorizeConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			payload, err := extractor(r)
 			if err != nil {
-				problem.Respond(w, problem.FromError(err, http.StatusBadRequest, problem.WithInstance(r)))
+				presenter.Error(w, r, err, presenter.WithStatus(http.StatusBadRequest))
 				return
 			}
 
-			// action = "METHOD:/path"
-			// GET:/api/person
-			action := fmt.Sprintf("%s:%s", strings.ToUpper(r.Method), r.URL.RequestURI())
-
 			input := authz.Input{
 				Payload: payload,
-				Action:  action,
+				Action:  strings.ToUpper(r.Method) + ":" + r.URL.RequestURI(),
 			}
 
-			// This call is agnostic to whether OPA is a service or a library.
+			// Agnostic to whether OPA is a service or a library. Any error
+			// contacting or evaluating the policy denies access.
 			allowed, err := policyEnforcer.IsAllowed(r.Context(), input)
 			if err != nil {
-				// If there's an error contacting or evaluating OPA, it's safer to deny access.
-				// Returns 500 Internal Server Error to indicate a system failure.
-				problem.Respond(w, problem.FromError(err, http.StatusInternalServerError, problem.WithInstance(r)))
+				presenter.Error(w, r, err, presenter.WithStatus(http.StatusInternalServerError), presenter.WithLogger(cfg.logger))
 				return
 			}
 
 			if !allowed {
-				// If the OPA policy returns 'false', deny access.
-				// Returns 403 Forbidden, the standard code for an authorization failure.
-				p := problem.New(
-					"access denied", http.StatusForbidden,
-					problem.WithDetail("You do not have permission to perform this action."),
-					problem.WithInstance(r),
+				presenter.Error(
+					w, r, nil,
+					presenter.WithStatus(http.StatusForbidden),
+					presenter.WithTitle("access denied"),
+					presenter.WithDetail("You do not have permission to perform this action."),
 				)
-				problem.Respond(w, p)
 				return
 			}
 
-			// If the policy allows it, the request continues to the final handler.
 			next.ServeHTTP(w, r)
 		})
 	}

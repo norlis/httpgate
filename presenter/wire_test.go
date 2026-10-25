@@ -54,7 +54,7 @@ func TestBind_wireSemantics(t *testing.T) {
 			t.Parallel()
 			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tc.body))
 			var d bindDTO
-			err := Bind(req, &d)
+			err := Bind(httptest.NewRecorder(), req, &d)
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
 			}
@@ -120,7 +120,7 @@ func TestBind_documentedV2Semantics(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var d bindDTO
-			err := Bind(httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tc.body)), &d)
+			err := Bind(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tc.body)), &d)
 			if err == nil {
 				t.Fatal("want error")
 			}

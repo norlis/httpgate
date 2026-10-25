@@ -5,13 +5,13 @@
 package problem
 
 import (
-	"context"
 	"encoding/json/v2"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/norlis/httpgate/logging"
+	"github.com/norlis/httpgate/trace"
 )
 
 // Detail is the RFC 9457 representation of a single problem occurrence.
@@ -76,51 +76,22 @@ func WithType(uri string) Option { return func(d *Detail) { d.Type = uri } }
 // WithDetail sets the Detail explanation.
 func WithDetail(detail string) Option { return func(d *Detail) { d.Detail = detail } }
 
-// WithRequestID sets the RequestID directly. Use this when the ID lives in
-// the request context rather than in the X-Request-Id header.
+// WithRequestID sets the RequestID directly, for correlation ids that are not
+// the trace id (WithInstance already covers that case).
 func WithRequestID(id string) Option { return func(d *Detail) { d.RequestID = id } }
 
-// WithInstance fills Instance from r.URL.Path and (if present) RequestID from
-// the request ID stored in the request context (see ContextWithRequestID).
-// This keeps the RequestID aligned with the correlation/trace ID set by
-// middleware, instead of guessing a header name.
+// WithInstance fills Instance from r.URL.Path and RequestID from the W3C trace
+// id carried by the request context (set by middleware.TraceContext), so
+// problem responses and logs share one identifier. Both are left empty when
+// r is nil; RequestID is left empty when the context carries no trace.
 func WithInstance(r *http.Request) Option {
 	return func(d *Detail) {
 		if r == nil {
 			return
 		}
 		d.Instance = r.URL.Path
-		if id := RequestIDFromContext(r.Context()); id != "" {
-			d.RequestID = id
-		}
-	}
-}
-
-type ctxRequestIDKey struct{}
-
-// ContextWithRequestID returns a copy of ctx carrying the request/correlation
-// ID. Middleware (e.g. TraceContext) stores the ID here so problem responses and
-// logs share one identifier without coupling to a specific header.
-func ContextWithRequestID(ctx context.Context, id string) context.Context {
-	return context.WithValue(ctx, ctxRequestIDKey{}, id)
-}
-
-// RequestIDFromContext returns the request ID stored by ContextWithRequestID,
-// or "" if absent.
-func RequestIDFromContext(ctx context.Context) string {
-	if ctx == nil {
-		return ""
-	}
-	id, _ := ctx.Value(ctxRequestIDKey{}).(string)
-	return id
-}
-
-// WithRequestIDFromContext sets RequestID from the ID stored in ctx. It is a
-// no-op when ctx carries no request ID.
-func WithRequestIDFromContext(ctx context.Context) Option {
-	return func(d *Detail) {
-		if id := RequestIDFromContext(ctx); id != "" {
-			d.RequestID = id
+		if tc, ok := trace.FromContext(r.Context()); ok {
+			d.RequestID = tc.TraceID
 		}
 	}
 }
