@@ -35,7 +35,9 @@ formatters:
           replacement: "a[b:]"
 
     gofumpt:
-      extra-rules: true
+      extra:
+        group-params: true
+        clothe-returns: true
 #      module-path: ..
 
 # === LINTERS ===

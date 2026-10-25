@@ -3,7 +3,6 @@ package middleware
 import (
 	"net/http"
 
-	"github.com/norlis/httpgate/problem"
 	"github.com/norlis/httpgate/trace"
 )
 
@@ -29,9 +28,9 @@ func WithResponseHeader(name string) TraceContextOption {
 // fresh local span id; an absent or malformed one means this service is the
 // entrypoint, so both ids are generated. The pair is stored in the request
 // context for automatic log injection (package logging) and outbound
-// propagation (trace.Transport); the trace id also feeds the problem+json
-// requestId. Place it before RequestLogger and Recover in the chain.
-func TraceContext(opts ...TraceContextOption) func(http.Handler) http.Handler {
+// propagation (trace.Transport); problem.WithInstance reads the trace id from
+// there as the problem+json requestId. Place it before RequestLogger and Recover in the chain.
+func TraceContext(opts ...TraceContextOption) Middleware {
 	cfg := traceContextConfig{}
 	for _, opt := range opts {
 		opt(&cfg)
@@ -47,7 +46,6 @@ func TraceContext(opts ...TraceContextOption) func(http.Handler) http.Handler {
 			}
 
 			ctx := trace.NewContext(r.Context(), tc)
-			ctx = problem.ContextWithRequestID(ctx, tc.TraceID)
 			if cfg.responseHeader != "" {
 				w.Header().Set(cfg.responseHeader, tc.TraceID)
 			}

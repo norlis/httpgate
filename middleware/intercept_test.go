@@ -171,3 +171,54 @@ func TestInterceptStatus_dropsHandlerWritesAfterProblemBody(t *testing.T) {
 		t.Fatalf("detail = %v, want 'resource not found'", pd["detail"])
 	}
 }
+
+func TestInterceptStatus_flushMaterializesPendingStatus(t *testing.T) {
+	t.Parallel()
+	mw := InterceptStatus(WithIntercept(http.StatusNotFound))
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_ = http.NewResponseController(w).Flush() // streaming handler flushing after the status
+	}))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest("GET", "/x", http.NoBody))
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (Flush must not commit an implicit 200)", rr.Code)
+	}
+	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/problem+json") {
+		t.Fatalf("Content-Type = %q", ct)
+	}
+}
+
+func TestInterceptStatus_dropsStaleEntityHeaders(t *testing.T) {
+	t.Parallel()
+	mw := InterceptStatus(WithIntercept(http.StatusInternalServerError))
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", "5")
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("ETag", `"abc"`)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, httptest.NewRequest("GET", "/x", http.NoBody))
+	for _, k := range []string{"Content-Length", "Content-Encoding", "ETag"} {
+		if v := rr.Header().Get(k); v != "" {
+			t.Errorf("%s = %q, must be dropped before the problem+json body", k, v)
+		}
+	}
+	var pd map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&pd); err != nil {
+		t.Fatalf("body is not the problem document: %v", err)
+	}
+}
+
+func TestInterceptStatus_flushReachesUnwrapOnlyWriter(t *testing.T) {
+	t.Parallel()
+	inner := &flushRecorder{ResponseRecorder: httptest.NewRecorder()}
+	h := InterceptStatus(WithIntercept(http.StatusNotFound))(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = http.NewResponseController(w).Flush()
+	}))
+	h.ServeHTTP(unwrapOnlyFlusher{ResponseWriter: inner, inner: inner}, httptest.NewRequest("GET", "/", http.NoBody))
+	if inner.flushed != 1 {
+		t.Fatalf("underlying Flush called %d times, want 1", inner.flushed)
+	}
+}

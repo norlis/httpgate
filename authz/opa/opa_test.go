@@ -156,8 +156,8 @@ func TestAllowedResources_anonymousWhenNoRoles(t *testing.T) {
 		t.Fatalf("AllowedResources: %v", err)
 	}
 	want := []string{
-		"GET:/status", "GET:/live$", "GET:/ready$",
-		"GET:/api/test$", "GET:/api/test-err$", "GET:/api/panic",
+		"GET:/status$", "GET:/live$", "GET:/ready$",
+		"GET:/api/test$", "GET:/api/test-err$", "GET:/api/panic$",
 	}
 	if !sortedEqual(got, want) {
 		t.Fatalf("got %v, want the whitelist patterns %v", got, want)
@@ -375,5 +375,41 @@ func TestNew_unencodableDataReturnsError(t *testing.T) {
 	_, err := New(t.Context(), Config{Query: "data.authz.allow", PoliciesPath: "testdata/policies"}, WithData(map[string]any{"x": make(chan int)}))
 	if err == nil {
 		t.Fatal("New with unencodable data must return an error, not panic")
+	}
+}
+
+func TestNew_rejectsNaNData(t *testing.T) {
+	t.Parallel()
+	_, err := New(t.Context(), Config{Query: "data.authz.allow", PoliciesPath: "testdata/policies"}, WithData(map[string]any{"roles": math.NaN()}))
+	if err == nil {
+		t.Fatal("New with NaN must return an error: inmem's RoundTripFast would store it as json.Number")
+	}
+}
+
+// Patterns are anchored at the start of the action by the policy, so an
+// allowed action smuggled into the query string (or the path) of another
+// request is denied. Covers the shipped policy and the test fixture policy.
+func TestIsAllowed_deniesPatternSmuggledIntoQuery(t *testing.T) {
+	t.Parallel()
+	admin := map[string]any{"roles": []string{"admin"}}
+	tests := []struct {
+		name   string
+		client *Client
+		in     authz.Input
+		want   bool
+	}{
+		{"shipped policy: whitelisted action", newTestClient(t), authz.Input{Action: "GET:/health"}, true},
+		{"shipped policy: whitelist in query", newTestClient(t), authz.Input{Action: "GET:/admin/secret?x=GET:/health"}, false},
+		{"shipped policy: whitelist in path", newTestClient(t), authz.Input{Action: "GET:/admin/GET:/health"}, false},
+		{"fixture policy: granted action", newMemClient(t, memData("GET:/mem$")), authz.Input{Payload: admin, Action: "GET:/mem"}, true},
+		{"fixture policy: permission in query", newMemClient(t, memData("GET:/mem$")), authz.Input{Payload: admin, Action: "GET:/other?x=GET:/mem"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := mustAllow(t, tt.client, tt.in); got != tt.want {
+				t.Fatalf("IsAllowed(%q) = %v, want %v", tt.in.Action, got, tt.want)
+			}
+		})
 	}
 }

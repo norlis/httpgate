@@ -63,6 +63,8 @@ func main() {
 		),
 		middleware.RequestLogger(logger, middleware.WithSkipPaths("/status", "/live", "/ready")),
 		middleware.Recover(logger),
+		middleware.Shed(256),               // bulkhead: reject with 503 before the process degrades
+		middleware.Timeout(10*time.Second), // per-request budget; 504 problem+json if exceeded
 		middleware.AllowAll(),
 	)
 	public := commons
@@ -72,7 +74,7 @@ func main() {
 		middleware.CSRFProtect(
 			middleware.WithTrustedOrigin("https://app.example.com"),
 		),
-		middleware.Authorize(enforcer, extractRoles),
+		middleware.Authorize(enforcer, extractRoles, middleware.WithAuthorizeLogger(logger)),
 	)
 
 	// readiness gate: server.Run flips it to 503 on SIGTERM so the LB drains
@@ -110,6 +112,7 @@ func main() {
 	if err := server.Run(
 		ctx, srv,
 		server.WithLogger(logger),
+		server.WithDrainDelay(3*time.Second), // let the load balancer stop routing before Shutdown
 		server.OnShutdown(ready.MarkDraining),
 	); err != nil {
 		logger.Error("server run failed", logging.Err(err))

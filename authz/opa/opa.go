@@ -20,6 +20,7 @@ import (
 	"github.com/open-policy-agent/opa/v1/rego"
 	"github.com/open-policy-agent/opa/v1/storage"
 	"github.com/open-policy-agent/opa/v1/storage/inmem"
+	"github.com/open-policy-agent/opa/v1/util"
 
 	"github.com/norlis/httpgate/authz"
 )
@@ -73,15 +74,22 @@ func WithData(data map[string]any) Option {
 	}
 }
 
-// newStore builds an in-memory store from data, returning (not panicking on)
-// values that cannot be represented as JSON.
+// newStore builds an in-memory store from data. The document is round-tripped
+// through encoding/json first: inmem's own round trip (RoundTripFast) accepts
+// values such as NaN that are not valid JSON, so without this check an invalid
+// document would be stored instead of rejected. The store then receives the
+// normalized value and skips its second round trip.
 func newStore(ctx context.Context, data map[string]any) (storage.Store, error) {
-	store := inmem.NewWithOpts(inmem.OptRoundTripOnWrite(true))
+	var doc any = data
+	if err := util.RoundTrip(&doc); err != nil {
+		return nil, fmt.Errorf("data document: %w", err)
+	}
+	store := inmem.NewWithOpts(inmem.OptRoundTripOnWrite(false))
 	txn, err := store.NewTransaction(ctx, storage.WriteParams)
 	if err != nil {
 		return nil, fmt.Errorf("store txn: %w", err)
 	}
-	if err := store.Write(ctx, txn, storage.AddOp, storage.Path{}, data); err != nil {
+	if err := store.Write(ctx, txn, storage.AddOp, storage.Path{}, doc); err != nil {
 		store.Abort(ctx, txn)
 		return nil, fmt.Errorf("store write: %w", err)
 	}
@@ -201,7 +209,7 @@ func (c *Client) IsAllowed(ctx context.Context, in authz.Input) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("opa: eval: %w", err)
 	}
-	if len(results) == 0 {
+	if len(results) == 0 || len(results[0].Expressions) == 0 {
 		return false, nil
 	}
 	allowed, ok := results[0].Expressions[0].Value.(bool)

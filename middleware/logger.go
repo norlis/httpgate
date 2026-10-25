@@ -46,7 +46,7 @@ func WithSkipPaths(paths ...string) RequestLoggerOption {
 // Caveat: client.address is r.RemoteAddr verbatim, so it includes the port,
 // and behind a load balancer or reverse proxy it is the proxy's address, not
 // the original client's — parse X-Forwarded-For yourself if you need that.
-func RequestLogger(log *slog.Logger, opts ...RequestLoggerOption) func(next http.Handler) http.Handler {
+func RequestLogger(log *slog.Logger, opts ...RequestLoggerOption) Middleware {
 	cfg := &requestLoggerConfig{}
 	for _, opt := range opts {
 		opt(cfg)
@@ -62,8 +62,10 @@ func RequestLogger(log *slog.Logger, opts ...RequestLoggerOption) func(next http
 			ww := WrapWriter(w)
 			t0 := time.Now()
 			defer func() {
-				log.InfoContext(
-					r.Context(),
+				// LogAttrs, not InfoContext: typed attrs are not boxed into
+				// ...any, so a disabled logger costs no allocations.
+				log.LogAttrs(
+					r.Context(), slog.LevelInfo,
 					"request completed",
 					slog.String(logging.KeyHTTPRequestMethod, r.Method),
 					slog.String(logging.KeyURLPath, r.URL.Path),
