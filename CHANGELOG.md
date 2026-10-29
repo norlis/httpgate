@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.5.0 - 2026-10-29
+
+### Incompatible
+
+- `server.Run` panics when the server's `Handler` is nil instead of serving `http.DefaultServeMux`, which exposed whatever was registered there (such as `net/http/pprof`). Migration: pass the handler explicitly; if the default mux was intended, pass `http.DefaultServeMux`.
+- `server.Run` binds the address before waiting for signals: a busy port is returned at once (`server: listen <addr>: ...`, before `server: listen and serve: ...`), and `server listening` is logged after the bind with the resolved address (`:0` now shows the real port). A serve failure after startup is returned as `server: serve: ...`. Alerts or tests matching the old error text must be updated.
+
+### Added
+
+- `server.Component` (`NewComponent(srv, logger)`, `Start(ctx, onFatal)`, `Stop(ctx)`, `Addr()`, `ErrAlreadyStarted`, `ErrStopped`): an `*http.Server` with a Start/Stop lifecycle for services that orchestrate several components. Start binds synchronously; a later serve failure goes to `onFatal` (logged as `server failed` only when `onFatal` is nil, so it is reported once); `onFatal` may call `Stop`. Wires `ErrorLog` to the structured logger like `Run`, which is now built on it. Replaces event-driven's `pkg/kit/httpserver`.
+
 ## v1.4.0 - 2026-10-19
 
 ### Incompatible

@@ -206,3 +206,16 @@ func TestRun_drainDelayKeepsServingBeforeShutdown(t *testing.T) {
 		t.Fatalf("Run returned %v after draining, want >= %v", got, delay)
 	}
 }
+
+func TestRun_bindErrorReturnsAtOnce(t *testing.T) {
+	t.Parallel()
+	ln, err := new(net.ListenConfig).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	srv := New(http.NotFoundHandler(), WithAddr(ln.Addr().String()))
+	if err := Run(t.Context(), srv, WithLogger(slog.New(slog.DiscardHandler))); err == nil {
+		t.Fatal("Run() on a busy port error = nil")
+	}
+}

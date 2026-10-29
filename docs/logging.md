@@ -24,7 +24,7 @@ httpgate implements the Microservices Logging Standard v1.0. This is the catalog
 | `error.type` | string | `logging.Err`, `Recover` | Go type of the root cause; `"panic"` in Recover |
 | `error.message` | string | `logging.Err`, `Recover` | full message with the chain of causes |
 | `error.stack_trace` | string | `logging.Err`, `Recover` | single string with embedded `\n` |
-| `server.address` | string | `server.Run` | |
+| `server.address` | string | `server.Run`, `server.Component` | bound address, `:0` resolved |
 | `shutdown.timeout` | number | `server.Run` | nanoseconds |
 | `query` | string | `authz/opa` | configured rego query |
 | `cors.reason` | string | `middleware.CORS` (debug) | reason for the rejection/skip |
@@ -39,7 +39,8 @@ httpgate implements the Microservices Logging Standard v1.0. This is the catalog
 | `server error` | error | `presenter.Error` (5xx, exactly once) |
 | `json encoding failed` | error | `presenter.JSON` (via `slog.Default()`; requires `slog.SetDefault(logging.New(...))` to conform to the standard) |
 | `problem encoding failed` | error | `problem.Respond` (via `slog.Default()`; requires `slog.SetDefault(logging.New(...))` to conform to the standard) |
-| `server listening` | info | `server.Run` |
+| `server listening` | info | `server.Run`, `server.Component` (after the bind) |
+| `server failed` | error | `server.Component`, only when `Start` got a nil `onFatal` |
 | `server draining` | info | `server.Run` |
 | `preflight request handled` | debug | `middleware.CORS` |
 | `preflight rejected` | debug | `middleware.CORS` |

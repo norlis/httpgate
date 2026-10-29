@@ -4,8 +4,6 @@ package server
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -52,38 +50,32 @@ func WithAddr(addr string) Option { return func(s *http.Server) { s.Addr = addr 
 // With is an escape hatch to set any *http.Server field (Protocols, TLSConfig…).
 func With(fn func(*http.Server)) Option { return fn }
 
-// Run starts s and blocks until ctx is canceled or SIGINT/SIGTERM arrives,
-// then drains: it invokes any OnShutdown hooks (e.g. flip a readiness gate to
+// Run binds s, serves it and blocks until ctx is canceled or SIGINT/SIGTERM
+// arrives, then drains: it invokes any OnShutdown hooks (e.g. flip a readiness gate to
 // 503 so the load balancer stops routing) and waits up to the shutdown timeout
-// for in-flight requests. Returns nil on a clean shutdown.
+// for in-flight requests. Returns nil on a clean shutdown and an error when
+// the bind or the server fails. Services that orchestrate several components
+// use Component instead.
 func Run(ctx context.Context, s *http.Server, opts ...RunOption) error {
 	cfg := runConfig{shutdownTimeout: 25 * time.Second, logger: slog.Default()}
 	for _, o := range opts {
 		o(&cfg)
 	}
 
-	// net/http logs its own faults (TLS handshake errors, bad HTTP/2 prefaces,
-	// superfluous WriteHeader) with log.Printf to stderr when ErrorLog is nil,
-	// which breaks the NDJSON contract. Route them through the structured logger.
-	if s.ErrorLog == nil {
-		s.ErrorLog = slog.NewLogLogger(cfg.logger.Handler(), slog.LevelError)
-	}
-
+	// The bind happens before the signal wait, so a busy port fails here
+	// instead of after the service reported itself up.
+	c := NewComponent(s, cfg.logger)
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	errc := make(chan error, 1)
-	go func() {
-		cfg.logger.InfoContext(ctx, "server listening", slog.String("server.address", s.Addr))
-		errc <- s.ListenAndServe()
-	}()
+	fatal := make(chan error, 1)
+	if err := c.Start(ctx, func(err error) { fatal <- err }); err != nil {
+		return err
+	}
 
 	select {
-	case err := <-errc:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
-		return fmt.Errorf("server: listen and serve: %w", err)
+	case err := <-fatal:
+		return err
 	case <-ctx.Done():
 		stop() // restore default signal handling; a second SIGTERM now kills
 		for _, fn := range cfg.onShutdown {
@@ -94,12 +86,9 @@ func Run(ctx context.Context, s *http.Server, opts ...RunOption) error {
 			time.Sleep(cfg.drainDelay)
 		}
 		cfg.logger.InfoContext(ctx, "server draining", slog.Duration("shutdown.timeout", cfg.shutdownTimeout))
-		sctx, cancel := context.WithTimeout(context.Background(), cfg.shutdownTimeout)
+		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cfg.shutdownTimeout)
 		defer cancel()
-		if err := s.Shutdown(sctx); err != nil {
-			return fmt.Errorf("server: graceful shutdown: %w", err)
-		}
-		return nil
+		return c.Stop(sctx)
 	}
 }
 

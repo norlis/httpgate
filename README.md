@@ -77,6 +77,8 @@ chain := middleware.New(
 
 `server.Run` flips readiness through `OnShutdown`, keeps serving for `WithDrainDelay` (recommended 3–5s on Kubernetes so Endpoints propagate; 0 on ECS behind an ALB, which deregisters before SIGTERM), then calls `Shutdown` and drains in-flight requests for `WithShutdownTimeout`. Keep `drainDelay + shutdownTimeout` below `terminationGracePeriodSeconds`.
 
+Services that run the HTTP server next to other components (consumers, schedulers) use `server.NewComponent(server.New(h), logger)` instead of `Run`: `Start(ctx, onFatal)` binds synchronously (a busy port fails startup) and serves in the background, a later serve failure goes to `onFatal` (or is logged when `onFatal` is nil), and `Stop(ctx)` drains in-flight requests. `Stop` runs neither `OnShutdown` hooks nor the drain delay; the orchestrator owns that order. `Addr()` returns the bound address with `:0` resolved.
+
 ## Packages
 
 | Package | What it does |
@@ -87,7 +89,7 @@ chain := middleware.New(
 | `health` | `Probe` (liveness/readiness with `Checker` interface, `WithCheckTimeout`) + `Status` (build/uptime) |
 | `authz` | `Enforcer` interface + `Input` + `PayloadExtractor` type |
 | `authz/opa` | OPA SDK adapter (`Client`, `IsAllowed`, `Query`, `Permissions`, `AllowedResources`) |
-| `server` | Hardened `http.Server` defaults (anti-Slowloris timeouts, bounded headers, HTTP/2 limits) + signal-driven graceful shutdown with drain delay (`New`, `Run`, `OnShutdown`, `WithDrainDelay`); `net/http` internal errors routed to the structured logger |
+| `server` | Hardened `http.Server` defaults (anti-Slowloris timeouts, bounded headers, HTTP/2 limits) + signal-driven graceful shutdown with drain delay (`New`, `Run`, `OnShutdown`, `WithDrainDelay`) and a Start/Stop `Component` for orchestrated lifecycles; `net/http` internal errors routed to the structured logger |
 | `logging` | Platform-standard logger: OTel/ECS field names, ISO 8601 UTC timestamps, automatic trace context injection, `Err` (error as a structured object) |
 | `trace` | W3C Trace Context: `Parse`, generation, context propagation and a `Transport` for outbound calls |
 
